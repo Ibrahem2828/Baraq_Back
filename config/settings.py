@@ -31,6 +31,9 @@ env = environ.Env(
     AI_SERVICE_TIMEOUT_SECONDS=(int, 60),
     AI_SERVICE_VERIFY_SSL=(bool, True),
     AI_SERVICE_RETRY_COUNT=(int, 2),
+    DATABASE_CONN_MAX_AGE=(int, 60),
+    DATABASE_CONN_HEALTH_CHECKS=(bool, True),
+    DATABASE_CONNECT_TIMEOUT=(int, 10),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
@@ -101,6 +104,13 @@ DATABASES = {
         default=f"sqlite:///{SQLITE_FALLBACK_PATH.as_posix()}",
     ),
 }
+DATABASES['default']['CONN_MAX_AGE'] = env('DATABASE_CONN_MAX_AGE')
+DATABASES['default']['CONN_HEALTH_CHECKS'] = env('DATABASE_CONN_HEALTH_CHECKS')
+if DATABASES['default']['ENGINE'] == 'django.db.backends.postgresql':
+    DATABASES['default'].setdefault('OPTIONS', {})
+    DATABASES['default']['OPTIONS']['connect_timeout'] = env(
+        'DATABASE_CONNECT_TIMEOUT'
+    )
 
 
 AUTH_PASSWORD_VALIDATORS = [
