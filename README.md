@@ -152,6 +152,7 @@ docker compose exec web python manage.py createsuperuser
 python manage.py makemigrations
 python manage.py migrate
 python manage.py seed_academic_data
+python manage.py seed_demo_data
 python manage.py check
 python manage.py test
 python manage.py test apps.common.tests
@@ -612,31 +613,33 @@ python manage.py test apps.ai_gateway.tests
 Run these in order after migrations and seed data:
 
 1. `python manage.py seed_academic_data`
-2. Register a user
-3. Login and get an access token
-4. Call `GET /api/users/me/`
-5. Setup `StudentProfile`
-6. Call `GET /api/education-stages/`
-7. Call `GET /api/subjects/`
-8. Add a subject to the user
-9. Create a study plan
-10. Call `GET /api/study-plans/today/`
-11. Complete one study task
-12. Create a quiz
-13. Start a quiz attempt
-14. Submit the attempt
-15. Call `GET /api/quiz-attempts/{id}/result/`
-16. Call `GET /api/health/`
-17. Call `GET /api/meta/`
-18. Call `GET /api/schema/`
-19. Call `GET /api/docs/`
+2. `python manage.py seed_demo_data`
+3. Login as `student@baraq.app` with `Student@123456`
+4. Register a user
+5. Login and get an access token
+6. Call `GET /api/users/me/`
+7. Setup `StudentProfile`
+8. Call `GET /api/education-stages/`
+9. Call `GET /api/subjects/`
+10. Add a subject to the user
+11. Create a study plan
+12. Call `GET /api/study-plans/today/`
+13. Complete one study task
+14. Create a quiz
+15. Start a quiz attempt
+16. Submit the attempt
+17. Call `GET /api/quiz-attempts/{id}/result/`
+18. Call `GET /api/health/`
+19. Call `GET /api/meta/`
+20. Call `GET /api/schema/`
+21. Call `GET /api/docs/`
 
 Phase 3.6 smoke additions:
 
-20. Login as a user and call `GET /api/ai-gateway/status/`
-21. Call `GET /api/ai-gateway/health/`
-22. Create `StudyPlan` with `generation_type="ai"` in mock mode
-23. Create `Quiz` with `generation_type="ai"` in mock mode
+22. Login as a user and call `GET /api/ai-gateway/status/`
+23. Call `GET /api/ai-gateway/health/`
+24. Create `StudyPlan` with `generation_type="ai"` in mock mode
+25. Create `Quiz` with `generation_type="ai"` in mock mode
 
 ## Phase 4 Notes
 
