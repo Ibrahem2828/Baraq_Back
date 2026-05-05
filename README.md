@@ -73,6 +73,15 @@ Phase 3.6 introduces a centralized AI gateway layer so future AI-enabled feature
 - exposing internal status and health endpoints for the gateway
 - preparing `study_plans` and `quizzes` to use the centralized gateway for `generation_type="ai"`
 
+### Student Sources MVP
+
+Student Sources lets students upload study material and use it with Baraq
+characters. خُطى creates a basic study plan, فاحص creates a quiz shell and
+simple TXT-based questions when text is available, رشيد returns study advice,
+and خلاصة/صدى are explicitly marked unavailable for now.
+
+Files are stored under `MEDIA_ROOT` and must use persistent storage in production.
+
 ## New Models in Phase 2
 
 - `StudyPlan`
@@ -146,6 +155,10 @@ docker compose up --build
 docker compose exec web python manage.py createsuperuser
 ```
 
+Docker runs Gunicorn, not `runserver`. `docker-compose.yml` mounts persistent
+`static_data` and `media_data` volumes. Set `DJANGO_RUN_MIGRATIONS=1` and
+`DJANGO_COLLECTSTATIC=1` when the container should run those startup steps.
+
 ## Important Commands
 
 ```powershell
@@ -158,6 +171,7 @@ python manage.py test
 python manage.py test apps.common.tests
 python manage.py test apps.study_plans.tests
 python manage.py test apps.quizzes.tests
+python manage.py test apps.sources.tests
 python manage.py test apps.ai_gateway.tests
 python manage.py test apps.common.tests apps.study_plans.tests apps.quizzes.tests
 python manage.py runserver
@@ -167,6 +181,27 @@ python manage.py runserver
 
 - Swagger UI: `/api/docs/`
 - OpenAPI schema: `/api/schema/`
+
+## Student Sources
+
+See `STUDENT_SOURCES.md` for upload rules, source capabilities, character
+actions, and production media storage notes.
+
+New endpoints:
+
+- `GET /api/student-sources/`
+- `POST /api/student-sources/`
+- `GET /api/student-sources/{id}/`
+- `PATCH /api/student-sources/{id}/`
+- `DELETE /api/student-sources/{id}/`
+- `POST /api/student-sources/{id}/process/`
+- `GET /api/student-sources/{id}/capabilities/`
+- `POST /api/student-sources/{id}/use-with-character/`
+- `POST /api/student-sources/{id}/use-with-khota/`
+- `POST /api/student-sources/{id}/use-with-fahes/`
+- `POST /api/student-sources/{id}/use-with-rasheed/`
+- `POST /api/student-sources/{id}/use-with-kholasa/`
+- `POST /api/student-sources/{id}/use-with-sada/`
 
 ## Existing Phase 1 Endpoints
 

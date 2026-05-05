@@ -56,6 +56,43 @@
         "in_progress",
         "submitted",
         "abandoned"
+      ],
+      "StudentSourceType": [
+        "pdf",
+        "text",
+        "image",
+        "document",
+        "presentation",
+        "audio",
+        "link",
+        "other"
+      ],
+      "StudentSourceStatus": [
+        "uploaded",
+        "processing",
+        "ready",
+        "failed"
+      ],
+      "SourceCharacter": [
+        "khota",
+        "fahes",
+        "rasheed",
+        "kholasa",
+        "sada"
+      ],
+      "SourceInteractionAction": [
+        "create_study_plan",
+        "create_quiz",
+        "study_advice",
+        "summarize",
+        "voice_help",
+        "unavailable"
+      ],
+      "SourceInteractionStatus": [
+        "created",
+        "completed",
+        "unavailable",
+        "failed"
       ]
     },
     "schemas": {
@@ -3384,6 +3421,164 @@
       },
       "SwaggerHTML": {
         "type": "html_document"
+      },
+      "StudentSource": {
+        "type": "object",
+        "fields": [
+          {
+            "field": "id",
+            "type": "integer",
+            "required": true,
+            "example": 1
+          },
+          {
+            "field": "title",
+            "type": "string",
+            "required": true,
+            "example": "???? ???????"
+          },
+          {
+            "field": "description",
+            "type": "string",
+            "required": false,
+            "example": "???? ?? ?????"
+          },
+          {
+            "field": "source_type",
+            "type": "enum",
+            "required": true,
+            "enum": "StudentSourceType",
+            "example": "text"
+          },
+          {
+            "field": "subject",
+            "type": "Subject|null",
+            "required": false
+          },
+          {
+            "field": "subject_name",
+            "type": "string|null",
+            "required": false,
+            "example": "?????????"
+          },
+          {
+            "field": "original_filename",
+            "type": "string",
+            "required": true,
+            "example": "demo_math_summary.txt"
+          },
+          {
+            "field": "file_size",
+            "type": "integer",
+            "required": true,
+            "example": 2048
+          },
+          {
+            "field": "mime_type",
+            "type": "string",
+            "required": true,
+            "example": "text/plain"
+          },
+          {
+            "field": "extension",
+            "type": "string",
+            "required": true,
+            "example": "txt"
+          },
+          {
+            "field": "status",
+            "type": "enum",
+            "required": true,
+            "enum": "StudentSourceStatus",
+            "example": "ready"
+          },
+          {
+            "field": "capabilities",
+            "type": "object",
+            "required": true
+          },
+          {
+            "field": "created_at",
+            "type": "datetime",
+            "required": true
+          },
+          {
+            "field": "updated_at",
+            "type": "datetime",
+            "required": true
+          }
+        ]
+      },
+      "StudentSourceDetail": {
+        "type": "object",
+        "extends": "StudentSource",
+        "extra_fields": [
+          "file_url",
+          "extracted_text_preview",
+          "has_extracted_text",
+          "processing_error",
+          "metadata"
+        ]
+      },
+      "StudentSourceInteraction": {
+        "type": "object",
+        "fields": [
+          {
+            "field": "id",
+            "type": "integer",
+            "required": true
+          },
+          {
+            "field": "source",
+            "type": "integer",
+            "required": true
+          },
+          {
+            "field": "character",
+            "type": "enum",
+            "enum": "SourceCharacter",
+            "required": true
+          },
+          {
+            "field": "action",
+            "type": "enum",
+            "enum": "SourceInteractionAction",
+            "required": true
+          },
+          {
+            "field": "status",
+            "type": "enum",
+            "enum": "SourceInteractionStatus",
+            "required": true
+          },
+          {
+            "field": "result_type",
+            "type": "string",
+            "required": false,
+            "example": "study_plan"
+          },
+          {
+            "field": "result_id",
+            "type": "integer|null",
+            "required": false,
+            "example": 3
+          },
+          {
+            "field": "message",
+            "type": "string",
+            "required": false
+          },
+          {
+            "field": "metadata",
+            "type": "object",
+            "required": false
+          },
+          {
+            "field": "created_at",
+            "type": "datetime",
+            "required": true
+          }
+        ]
       }
     },
     "examples": {
@@ -9256,6 +9451,797 @@
             "This endpoint returns HTML and is mainly for developers and testers."
           ],
           "related_screens": []
+        }
+      ]
+    },
+    {
+      "name": "Student Sources",
+      "description": "Student-owned uploaded sources and Baraq character actions. This is a new additive API section; older sections are unchanged.",
+      "allowed_file_types": [
+        "pdf",
+        "txt",
+        "jpg",
+        "jpeg",
+        "png",
+        "webp",
+        "doc",
+        "docx",
+        "ppt",
+        "pptx",
+        "mp3",
+        "m4a",
+        "wav"
+      ],
+      "blocked_file_types": [
+        "exe",
+        "sh",
+        "bat",
+        "cmd",
+        "js",
+        "html",
+        "php",
+        "py",
+        "jar",
+        "zip",
+        "rar",
+        "7z",
+        "sql",
+        "env"
+      ],
+      "max_upload_size": {
+        "mb": 25,
+        "setting": "STUDENT_SOURCE_MAX_UPLOAD_MB"
+      },
+      "character_capabilities": {
+        "khota": {
+          "available": true,
+          "actions": [
+            "create_study_plan"
+          ]
+        },
+        "fahes": {
+          "available": true,
+          "actions": [
+            "create_quiz"
+          ]
+        },
+        "rasheed": {
+          "available": true,
+          "actions": [
+            "study_advice"
+          ]
+        },
+        "kholasa": {
+          "available": false,
+          "actions": []
+        },
+        "sada": {
+          "available": false,
+          "actions": []
+        }
+      },
+      "endpoints": [
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "List Student Sources",
+          "method": "GET",
+          "path": "/api/student-sources/",
+          "description": "List current user sources.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "paginated",
+              "items": {
+                "$ref": "#/components/schemas/StudentSource"
+              }
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "multipart/form-data",
+          "query_params": [],
+          "path_params": [],
+          "request_body": {
+            "required": true,
+            "content_type": "multipart/form-data",
+            "schema": {
+              "fields": [
+                "title",
+                "description",
+                "subject",
+                "file"
+              ]
+            },
+            "example": {
+              "title": "???? ???????",
+              "description": "???? ?? ?????",
+              "subject": 1,
+              "file": "<binary>"
+            }
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Create Student Source",
+          "method": "POST",
+          "path": "/api/student-sources/",
+          "description": "Upload a source using multipart/form-data.",
+          "response": {
+            "success_status": 201,
+            "content_type": "application/json",
+            "schema": {
+              "$ref": "#/components/schemas/StudentSourceDetail"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Retrieve Student Source",
+          "method": "GET",
+          "path": "/api/student-sources/{id}/",
+          "description": "Retrieve one current-user source.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "$ref": "#/components/schemas/StudentSourceDetail"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": true,
+            "schema": {
+              "fields": [
+                "title",
+                "description",
+                "subject"
+              ]
+            },
+            "example": {
+              "title": "???? ??????? ??????",
+              "subject": 1
+            }
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Update Student Source",
+          "method": "PATCH",
+          "path": "/api/student-sources/{id}/",
+          "description": "Update title, description, or subject.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "$ref": "#/components/schemas/StudentSourceDetail"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Delete Student Source",
+          "method": "DELETE",
+          "path": "/api/student-sources/{id}/",
+          "description": "Delete source record and file.",
+          "response": {
+            "success_status": 204,
+            "content_type": "application/json",
+            "schema": {
+              "type": "empty"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Process Student Source",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/process/",
+          "description": "Process TXT now; keep other file types saved for future processing.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {
+              "success": true,
+              "message": "??? ????? ????? ????? ???? ?????? ????????? ???? ?????.",
+              "source": {
+                "id": 1,
+                "status": "ready"
+              }
+            }
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Student Source Capabilities",
+          "method": "GET",
+          "path": "/api/student-sources/{id}/capabilities/",
+          "description": "Return character capabilities for this source.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": true,
+            "schema": {
+              "fields": [
+                "character",
+                "action"
+              ]
+            },
+            "example": {
+              "character": "khota",
+              "action": "create_study_plan"
+            }
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Use With Character",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/use-with-character/",
+          "description": "Use one Baraq character with this source.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {
+              "success": true,
+              "message": "????? ???? ??? ?????? ?????? ?? ?????.",
+              "interaction": {
+                "id": 1,
+                "character": "khota"
+              },
+              "study_plan": {
+                "id": 3
+              }
+            }
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Use With Khota",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/use-with-khota/",
+          "description": "Convenience action for ????.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Use With Fahes",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/use-with-fahes/",
+          "description": "Convenience action for ????.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Use With Rasheed",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/use-with-rasheed/",
+          "description": "Convenience action for ????.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {}
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Use With Kholasa",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/use-with-kholasa/",
+          "description": "Returns unavailable for ?????.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {
+              "success": false,
+              "available": false,
+              "message": "????? ??? ?????? ??????. ?????? ??????? ?? ????? ????? ???????."
+            }
+          }
+        },
+        {
+          "auth_required": true,
+          "permissions": [
+            "IsAuthenticated",
+            "Owner scoped queryset"
+          ],
+          "content_type": "application/json",
+          "query_params": [],
+          "path_params": [
+            {
+              "name": "id",
+              "type": "integer",
+              "required": true
+            }
+          ],
+          "request_body": {
+            "required": false,
+            "schema": null,
+            "example": null
+          },
+          "errors": [
+            {
+              "status": 400,
+              "description": "Validation error such as unsafe extension or file too large."
+            },
+            {
+              "status": 401,
+              "description": "Authentication required."
+            },
+            {
+              "status": 404,
+              "description": "Source not found or owned by another user."
+            }
+          ],
+          "frontend_notes": [],
+          "related_screens": [
+            "StudentSources",
+            "CharacterActionSheet"
+          ],
+          "name": "Use With Sada",
+          "method": "POST",
+          "path": "/api/student-sources/{id}/use-with-sada/",
+          "description": "Returns unavailable for ???.",
+          "response": {
+            "success_status": 200,
+            "content_type": "application/json",
+            "schema": {
+              "type": "object"
+            },
+            "example": {
+              "success": false,
+              "available": false,
+              "message": "??? ??? ????? ??????. ?????? ??????? ?? ????????? ???????."
+            }
+          }
         }
       ]
     }

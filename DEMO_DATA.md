@@ -31,6 +31,13 @@ admin@baraq.app
 Admin@123456
 ```
 
+Project Admin:
+
+```text
+project.admin@baraq.app
+ProjectAdmin@123456
+```
+
 Student:
 
 ```text
@@ -52,6 +59,8 @@ Change these credentials before any production deployment.
 - 21 questions.
 - 66 choices.
 - 1 submitted demo quiz attempt for the mathematics quiz.
+- 1 ready TXT student source.
+- Demo interactions with رشيد, خُطى, and فاحص for that source.
 
 ## Endpoints With Demo Data
 
@@ -81,6 +90,9 @@ Authenticated as `student@baraq.app`:
 - `POST /api/quiz-attempts/{id}/answer/`
 - `POST /api/quiz-attempts/{id}/submit/`
 - `GET /api/quiz-attempts/{id}/result/`
+- `GET /api/student-sources/`
+- `GET /api/student-sources/{id}/capabilities/`
+- `POST /api/student-sources/{id}/use-with-character/`
 
 ## Notes
 

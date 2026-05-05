@@ -3,6 +3,7 @@ from decimal import Decimal
 import sys
 
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -25,11 +26,15 @@ from apps.quizzes.services import calculate_attempt_result
 from apps.students.models import StudentProfile
 from apps.study_plans.models import StudyPlan, StudyTask
 from apps.study_plans.services import update_plan_completion
+from apps.sources.models import StudentSource, StudentSourceInteraction
+from apps.sources.services import use_source_with_character
 from apps.subjects.models import EducationStage, Subject, UserSubject
 
 
 ADMIN_EMAIL = 'admin@baraq.app'
 ADMIN_PASSWORD = 'Admin@123456'
+PROJECT_ADMIN_EMAIL = 'project.admin@baraq.app'
+PROJECT_ADMIN_PASSWORD = 'ProjectAdmin@123456'
 STUDENT_EMAIL = 'student@baraq.app'
 STUDENT_PASSWORD = 'Student@123456'
 GRADE_LEVEL = 'الثالث الثانوي'
@@ -323,6 +328,7 @@ class Command(BaseCommand):
         stages = self._seed_stages()
         subjects = self._seed_subjects(stages)
         admin = self._seed_admin(User)
+        project_admin = self._seed_project_admin(User)
         student = self._seed_student(User)
         self._seed_student_profile(student, stages['المرحلة الثانوية'])
         selected_subjects_count = self._seed_user_subjects(student, subjects)
@@ -331,6 +337,10 @@ class Command(BaseCommand):
         quizzes = self._seed_quizzes(student, subjects)
         questions_count, choices_count = self._seed_questions(quizzes)
         attempt_created = self._seed_demo_attempt(student, quizzes['اختبار سريع في التفاضل'])
+        demo_sources_count, demo_interactions_count = self._seed_demo_sources_and_interactions(
+            student,
+            subjects,
+        )
 
         self.stdout.write(self.style.SUCCESS('Demo data seeded successfully.'))
         self.stdout.write(f'Education stages: {len(stages)}')
@@ -342,14 +352,18 @@ class Command(BaseCommand):
         self.stdout.write(f'Questions: {questions_count}')
         self.stdout.write(f'Choices: {choices_count}')
         self.stdout.write(f'Demo submitted attempt: {"yes" if attempt_created else "no"}')
+        self.stdout.write(f'Demo student sources: {demo_sources_count}')
+        self.stdout.write(f'Demo source interactions: {demo_interactions_count}')
         self.stdout.write('')
         self.stdout.write(self.style.WARNING('Demo credentials only. Change them before production.'))
         self.stdout.write(f'Admin: {admin.email} / {ADMIN_PASSWORD}')
+        self.stdout.write(f'Project admin: {project_admin.email} / {PROJECT_ADMIN_PASSWORD}')
         self.stdout.write(f'Student: {student.email} / {STUDENT_PASSWORD}')
 
     def _reset_demo_data(self):
-        QuestionBankItem.objects.filter(created_by__email__in=[ADMIN_EMAIL, STUDENT_EMAIL]).delete()
-        get_user_model().objects.filter(email__in=[ADMIN_EMAIL, STUDENT_EMAIL]).delete()
+        demo_emails = [ADMIN_EMAIL, PROJECT_ADMIN_EMAIL, STUDENT_EMAIL]
+        QuestionBankItem.objects.filter(created_by__email__in=demo_emails).delete()
+        get_user_model().objects.filter(email__in=demo_emails).delete()
         self.stdout.write(self.style.WARNING('Deleted demo users and their owned demo data.'))
 
     def _seed_stages(self):
@@ -400,6 +414,23 @@ class Command(BaseCommand):
         admin.save()
         self._write_upsert('admin user', admin.email, created)
         return admin
+
+    def _seed_project_admin(self, User):
+        project_admin, created = User.objects.update_or_create(
+            email=PROJECT_ADMIN_EMAIL,
+            defaults={
+                'full_name': 'مدير مشروع برّاق',
+                'phone_number': '+963900000002',
+                'role': User.Roles.ADMIN,
+                'is_active': True,
+                'is_staff': True,
+                'is_superuser': False,
+            },
+        )
+        project_admin.set_password(PROJECT_ADMIN_PASSWORD)
+        project_admin.save()
+        self._write_upsert('project admin user', project_admin.email, created)
+        return project_admin
 
     def _seed_student(self, User):
         student, created = User.objects.update_or_create(
@@ -691,6 +722,67 @@ class Command(BaseCommand):
         attempt.duration_seconds = max(int((submitted_at - attempt.started_at).total_seconds()), 0)
         attempt.save()
         return True
+
+    def _seed_demo_sources_and_interactions(self, student, subjects):
+        subject = subjects[('الرياضيات', GRADE_LEVEL)]
+        source, created = StudentSource.objects.get_or_create(
+            user=student,
+            title='ملخص تجريبي في الرياضيات',
+            defaults={
+                'subject': subject,
+                'description': 'مصدر نصي تجريبي يوضح كيف تتعامل شخصيات برّاق مع مصادر الطالب.',
+                'source_type': StudentSource.SourceType.TEXT,
+                'original_filename': 'demo_math_summary.txt',
+                'file_size': 0,
+                'mime_type': 'text/plain',
+                'extension': 'txt',
+                'status': StudentSource.Status.READY,
+                'extracted_text': (
+                    'ملخص في التفاضل: مشتقة x^2 هي 2x. '
+                    'النهايات تساعد على فهم سلوك الدالة قرب نقطة محددة. '
+                    'عند حل مسائل التفاضل يجب تحديد القاعدة المناسبة ثم التحقق من الناتج.'
+                ),
+                'metadata': {'demo_seed': True},
+            },
+        )
+        if created or not source.file:
+            content = ContentFile(
+                (
+                    'ملخص في التفاضل\n'
+                    'مشتقة x^2 هي 2x.\n'
+                    'النهايات تساعد على فهم سلوك الدالة قرب نقطة محددة.\n'
+                    'ابدأ بتحديد القاعدة المناسبة ثم تحقق من الناتج.\n'
+                ).encode('utf-8'),
+                name='demo_math_summary.txt',
+            )
+            source.file.save('demo_math_summary.txt', content, save=False)
+        source.subject = subject
+        source.file_size = source.file.size if source.file else source.file_size
+        source.status = StudentSource.Status.READY
+        source.save()
+        self._write_upsert('student source', source.title, created)
+
+        interactions_before = StudentSourceInteraction.objects.filter(
+            user=student,
+            source=source,
+        ).count()
+        for character in (
+            StudentSourceInteraction.Character.RASHEED,
+            StudentSourceInteraction.Character.KHOTA,
+            StudentSourceInteraction.Character.FAHES,
+        ):
+            if not StudentSourceInteraction.objects.filter(
+                user=student,
+                source=source,
+                character=character,
+            ).exists():
+                use_source_with_character(student, source, character)
+
+        interactions_after = StudentSourceInteraction.objects.filter(
+            user=student,
+            source=source,
+        ).count()
+        return 1, interactions_after - interactions_before
 
     def _write_upsert(self, kind, label, created):
         action = 'created' if created else 'updated'

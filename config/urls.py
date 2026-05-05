@@ -1,10 +1,12 @@
 from django.contrib import admin
+from django.conf import settings
+from django.conf.urls.static import static
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-admin.site.site_header = "Baraq Administration"
+admin.site.site_header = "لوحة إدارة برّاق"
 admin.site.site_title = "Baraq Admin"
-admin.site.index_title = "Baraq MVP Control Panel"
+admin.site.index_title = "إدارة منصة برّاق"
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -21,4 +23,8 @@ urlpatterns = [
     path('api/', include('apps.subjects.urls')),
     path('api/', include('apps.study_plans.urls')),
     path('api/', include('apps.quizzes.urls')),
+    path('api/', include('apps.sources.urls')),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

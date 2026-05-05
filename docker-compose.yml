@@ -3,18 +3,21 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: sh -c "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
     volumes:
-      - .:/app
+      - static_data:/app/staticfiles
+      - media_data:/app/media
     ports:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      DJANGO_RUN_MIGRATIONS: "1"
+      DJANGO_COLLECTSTATIC: "1"
+      MEDIA_ROOT: /app/media
+      MEDIA_URL: /media/
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_started
 
   db:
     image: postgres:16-alpine
@@ -41,3 +44,5 @@ services:
 
 volumes:
   postgres_data:
+  static_data:
+  media_data:

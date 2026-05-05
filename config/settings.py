@@ -34,6 +34,9 @@ env = environ.Env(
     DATABASE_CONN_MAX_AGE=(int, 60),
     DATABASE_CONN_HEALTH_CHECKS=(bool, True),
     DATABASE_CONNECT_TIMEOUT=(int, 10),
+    MEDIA_ROOT=(str, str(BASE_DIR / 'media')),
+    MEDIA_URL=(str, '/media/'),
+    STUDENT_SOURCE_MAX_UPLOAD_MB=(int, 25),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
@@ -64,6 +67,7 @@ INSTALLED_APPS = [
     'apps.subjects',
     'apps.study_plans',
     'apps.quizzes',
+    'apps.sources',
     'apps.ai_gateway',
 ]
 
@@ -156,6 +160,9 @@ AI_SERVICE_RETRY_COUNT = env('AI_SERVICE_RETRY_COUNT')
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+MEDIA_URL = env('MEDIA_URL')
+MEDIA_ROOT = env('MEDIA_ROOT')
+STUDENT_SOURCE_MAX_UPLOAD_MB = env('STUDENT_SOURCE_MAX_UPLOAD_MB')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'users.User'
@@ -201,6 +208,11 @@ SPECTACULAR_SETTINGS = {
         'QuestionTypeEnum': 'apps.quizzes.models.QuestionTypeChoices',
         'AttemptStatusEnum': 'apps.quizzes.models.AttemptStatusChoices',
         'QuizProgressActionEnum': 'apps.quizzes.models.QuizLogActionChoices',
+        'StudentSourceTypeEnum': 'apps.sources.models.StudentSource.SourceType',
+        'StudentSourceStatusEnum': 'apps.sources.models.StudentSource.Status',
+        'SourceCharacterEnum': 'apps.sources.models.StudentSourceInteraction.Character',
+        'SourceInteractionActionEnum': 'apps.sources.models.StudentSourceInteraction.Action',
+        'SourceInteractionStatusEnum': 'apps.sources.models.StudentSourceInteraction.Status',
     },
 }
 
