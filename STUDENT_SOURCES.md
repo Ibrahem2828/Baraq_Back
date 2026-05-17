@@ -1,13 +1,48 @@
-# Student Sources MVP
+# Student Sources
 
-Student Sources let an authenticated student upload study material and then use
-one Baraq character with that source.
+## المفهوم
 
-This MVP stores files safely, reads plain text files, exposes capabilities for
-the frontend, and records character interactions. It does not run real AI, OCR,
-document parsing, summarization, or audio transcription yet.
+`StudentSourceCollection` هو مجلد أو مشروع دراسي يملكه الطالب، مثل: الرياضيات، محاضرات الذكاء الاصطناعي، كتاب التحليل، أو مشروع التخرج.
 
-## Endpoints
+`StudentSource` هو ملف داخل النظام، ويمكن أن يكون داخل collection أو مستقلًا كما كان سابقًا. مسارات `student-sources` القديمة لم تتغير.
+
+## رفع مصدر
+
+`POST /api/student-sources/`
+
+`multipart/form-data`:
+
+- `title`: مطلوب.
+- `description`: اختياري.
+- `subject`: اختياري.
+- `collection`: اختياري.
+- `file`: مطلوب.
+
+الباك يستنتج `user`, `source_type`, `file_size`, `mime_type`, `extension`, و`status`.
+
+إذا كان `collection` يملك `subject` ولم يرسل المصدر مادة، يرث المصدر مادة المجلد تلقائيًا.
+
+## قيود الملفات
+
+الحد الأقصى الافتراضي 25MB عبر `STUDENT_SOURCE_MAX_UPLOAD_MB`.
+
+الأنواع المدعومة الآن: PDF, TXT, JPG, JPEG, PNG, WEBP, DOC, DOCX, PPT, PPTX, MP3, M4A, WAV.
+
+الملفات الخطيرة مثل `exe`, `sh`, `bat`, `cmd`, `js`, `html`, `php`, `py`, `jar`, `zip`, `rar`, `7z`, `sql`, و`env` مرفوضة برسالة 400.
+
+أسماء الملفات العربية محفوظة في `original_filename`، بينما اسم التخزين الفعلي UUID آمن.
+
+## معالجة المصدر
+
+`POST /api/student-sources/{id}/process/`
+
+ملفات TXT فقط تقرأ مباشرة. PDF/Word/PowerPoint/Image/Audio تحفظ دون معالجة ثقيلة وترجع:
+
+`تم حفظ المصدر، والمعالجة المتقدمة لهذا النوع ستتوفر لاحقًا.`
+
+لا يوجد OCR أو transcription أو AI حقيقي في هذه المرحلة.
+
+## Endpoints المصادر
 
 - `GET /api/student-sources/`
 - `POST /api/student-sources/`
@@ -23,56 +58,45 @@ document parsing, summarization, or audio transcription yet.
 - `POST /api/student-sources/{id}/use-with-kholasa/`
 - `POST /api/student-sources/{id}/use-with-sada/`
 
-All endpoints require `Authorization: Bearer <access_token>`. A student can only
-see and act on sources owned by that same user.
+## Endpoints المجلدات
 
-## Upload
+- `GET /api/student-source-collections/`
+- `POST /api/student-source-collections/`
+- `GET /api/student-source-collections/{id}/`
+- `PATCH /api/student-source-collections/{id}/`
+- `DELETE /api/student-source-collections/{id}/`
+- `GET /api/student-source-collections/{id}/sources/`
+- `GET /api/student-source-collections/{id}/capabilities/`
+- `POST /api/student-source-collections/{id}/use-with-character/`
+- `POST /api/student-source-collections/{id}/use-with-khota/`
+- `POST /api/student-source-collections/{id}/use-with-fahes/`
+- `POST /api/student-source-collections/{id}/use-with-rasheed/`
+- `POST /api/student-source-collections/{id}/use-with-kholasa/`
+- `POST /api/student-source-collections/{id}/use-with-sada/`
 
-`POST /api/student-sources/` uses `multipart/form-data`.
+الحذف الحالي يمنع حذف مجلد يحتوي مصادر:
 
-Fields:
+`لا يمكن حذف مجلد يحتوي على مصادر. انقل المصادر أو احذفها أولًا.`
 
-- `title`: required.
-- `description`: optional.
-- `subject`: optional subject id.
-- `file`: required.
+## الشخصيات
 
-## Supported Files
+خُطى مع مجلد: تنشئ خطة مذاكرة عامة من مصادر المجلد إذا وُجدت مادة على المجلد أو أحد مصادره. إذا لم توجد مادة، ترجع رسالة 200 آمنة داخل interaction ولا ترجع 500.
 
-Allowed extensions: `pdf`, `txt`, `jpg`, `jpeg`, `png`, `webp`, `doc`, `docx`,
-`ppt`, `pptx`, `mp3`, `m4a`, `wav`.
+فاحص مع مجلد: ينشئ Quiz draft، ويضيف أسئلة short answer بسيطة إذا وُجد `extracted_text` في مصادر TXT.
 
-Blocked examples: `exe`, `sh`, `bat`, `cmd`, `js`, `html`, `php`, `py`, `jar`,
-`zip`, `rar`, `7z`, `sql`, `env`.
+رشيد مع مجلد: يرجع نصائح تنظيمية حسب عدد المصادر وأنواعها وحالة النص المستخرج.
 
-Default maximum size: `25MB`, configured by `STUDENT_SOURCE_MAX_UPLOAD_MB`.
+خلاصة: غير متوفرة حاليًا وتعيد رسالة coming soon.
 
-## Processing
+صدى: غير متوفر حاليًا وتعيد رسالة coming soon.
 
-- TXT: read synchronously and store `extracted_text`; status becomes `ready`.
-- PDF: saved only; advanced parsing later.
-- Images: saved only; OCR later.
-- Word/PowerPoint: saved only; document parsing later.
-- Audio: saved only; transcription through صدى later.
+## أخطاء رفع شائعة
 
-## Capabilities
+- بدون ملف: `يرجى اختيار ملف لرفعه.`
+- بدون عنوان: `يرجى إدخال عنوان للمصدر.`
+- بدون امتداد: `تعذر تحديد نوع الملف. تأكد أن الملف يحتوي على امتداد صحيح.`
+- امتداد غير مدعوم: `نوع الملف غير مدعوم: .ext`
+- ملف خطير: `هذا النوع من الملفات غير مسموح به: .ext`
+- ملف أكبر من الحد: `حجم الملف أكبر من الحد المسموح (25MB).`
 
-`GET /api/student-sources/{id}/capabilities/` returns availability for خُطى,
-فاحص, رشيد, خلاصة, and صدى.
-
-خُطى creates a basic study plan and four tasks when the source has a subject.
-فاحص creates a quiz shell and simple short-answer questions when TXT content is
-available. رشيد returns study advice. خلاصة and صدى return unavailable messages.
-
-## Storage Notes
-
-Files are stored under:
-
-```text
-student_sources/<user_id>/<year>/<month>/<uuid>.<ext>
-```
-
-Development media serving is enabled only when `DEBUG=True`.
-
-Production must use persistent media storage. Docker Compose mounts `media_data`
-at `/app/media`; Coolify, Nginx, or object storage should serve `/media/`.
+كل هذه الحالات ترجع 400 وليس 500.

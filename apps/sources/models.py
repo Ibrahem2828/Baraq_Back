@@ -47,6 +47,13 @@ class StudentSource(BaseModel):
         null=True,
         blank=True,
     )
+    collection = models.ForeignKey(
+        'sources.StudentSourceCollection',
+        on_delete=models.SET_NULL,
+        related_name='sources',
+        null=True,
+        blank=True,
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     source_type = models.CharField(
@@ -75,6 +82,59 @@ class StudentSource(BaseModel):
 
     def __str__(self):
         return f'{self.title} - {self.user.email}'
+
+
+class StudentSourceCollection(BaseModel):
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        ARCHIVED = 'archived', 'Archived'
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='student_source_collections',
+    )
+    subject = models.ForeignKey(
+        'subjects.Subject',
+        on_delete=models.SET_NULL,
+        related_name='student_source_collections',
+        null=True,
+        blank=True,
+    )
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    color = models.CharField(max_length=40, blank=True)
+    icon = models.CharField(max_length=80, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+    )
+
+    class Meta:
+        ordering = ('-updated_at', '-created_at')
+        verbose_name = 'Student Source Collection'
+        verbose_name_plural = 'Student Source Collections'
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['user', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.name} - {self.user.email}'
+
+    @property
+    def source_count(self):
+        return self.sources.count()
+
+    @property
+    def last_source_at(self):
+        last_source = self.sources.order_by('-created_at').only('created_at').first()
+        return last_source.created_at if last_source else None
+
+    @property
+    def total_file_size(self):
+        return self.sources.aggregate(total=models.Sum('file_size'))['total'] or 0
 
 
 class StudentSourceInteraction(BaseModel):
@@ -108,6 +168,15 @@ class StudentSourceInteraction(BaseModel):
         StudentSource,
         on_delete=models.CASCADE,
         related_name='interactions',
+        null=True,
+        blank=True,
+    )
+    collection = models.ForeignKey(
+        StudentSourceCollection,
+        on_delete=models.CASCADE,
+        related_name='interactions',
+        null=True,
+        blank=True,
     )
     character = models.CharField(max_length=20, choices=Character.choices)
     action = models.CharField(max_length=30, choices=Action.choices)
@@ -127,12 +196,23 @@ class StudentSourceInteraction(BaseModel):
         verbose_name_plural = 'Student Source Interactions'
 
     def __str__(self):
-        return f'{self.character} - {self.source.title}'
+        target = self.source or self.collection
+        return f'{self.character} - {target}'
 
     def clean(self):
         super().clean()
+        if bool(self.source_id) == bool(self.collection_id):
+            raise ValidationError(
+                {'source': 'Interaction must target exactly one source or collection.'}
+            )
         if self.source_id and self.user_id and self.source.user_id != self.user_id:
             raise ValidationError({'user': 'Interaction user must own the source.'})
+        if (
+            self.collection_id
+            and self.user_id
+            and self.collection.user_id != self.user_id
+        ):
+            raise ValidationError({'user': 'Interaction user must own the collection.'})
 
     def save(self, *args, **kwargs):
         self.full_clean()

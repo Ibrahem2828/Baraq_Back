@@ -163,6 +163,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = env('MEDIA_URL')
 MEDIA_ROOT = env('MEDIA_ROOT')
 STUDENT_SOURCE_MAX_UPLOAD_MB = env('STUDENT_SOURCE_MAX_UPLOAD_MB')
+Path(MEDIA_ROOT).mkdir(parents=True, exist_ok=True)
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 AUTH_USER_MODEL = 'users.User'
@@ -210,6 +211,7 @@ SPECTACULAR_SETTINGS = {
         'QuizProgressActionEnum': 'apps.quizzes.models.QuizLogActionChoices',
         'StudentSourceTypeEnum': 'apps.sources.models.StudentSource.SourceType',
         'StudentSourceStatusEnum': 'apps.sources.models.StudentSource.Status',
+        'StudentSourceCollectionStatusEnum': 'apps.sources.models.StudentSourceCollection.Status',
         'SourceCharacterEnum': 'apps.sources.models.StudentSourceInteraction.Character',
         'SourceInteractionActionEnum': 'apps.sources.models.StudentSourceInteraction.Action',
         'SourceInteractionStatusEnum': 'apps.sources.models.StudentSourceInteraction.Status',

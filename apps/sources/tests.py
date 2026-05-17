@@ -12,7 +12,7 @@ from apps.quizzes.models import Quiz
 from apps.study_plans.models import StudyPlan
 from apps.subjects.models import EducationStage, Subject
 
-from .models import StudentSource, StudentSourceInteraction
+from .models import StudentSource, StudentSourceCollection, StudentSourceInteraction
 
 User = get_user_model()
 
@@ -56,17 +56,35 @@ class StudentSourceAPITestCase(APITestCase):
     def authenticate(self, user=None):
         self.client.force_authenticate(user or self.user)
 
-    def upload_source(self, filename='summary.txt', content=None, content_type='text/plain', subject=True):
+    def upload_source(
+        self,
+        filename='summary.txt',
+        content=None,
+        content_type='text/plain',
+        subject=True,
+        collection=None,
+        title='Math Summary',
+    ):
         self.authenticate()
         file_content = content if content is not None else b'Derivatives help measure change.\nLimits describe behavior near a value.'
         payload = {
-            'title': 'Math Summary',
+            'title': title,
             'description': 'Uploaded class notes',
             'file': SimpleUploadedFile(filename, file_content, content_type=content_type),
         }
         if subject:
             payload['subject'] = self.subject.id
+        if collection:
+            payload['collection'] = collection.id
         return self.client.post(reverse('student-source-list'), payload, format='multipart')
+
+    def create_collection(self, user=None, subject=True, name='Mathematics'):
+        return StudentSourceCollection.objects.create(
+            user=user or self.user,
+            subject=self.subject if subject else None,
+            name=name,
+            description='Student folder',
+        )
 
     def test_upload_allowed_file(self):
         response = self.upload_source()
@@ -75,11 +93,86 @@ class StudentSourceAPITestCase(APITestCase):
         self.assertEqual(response.data['source_type'], StudentSource.SourceType.TEXT)
         self.assertEqual(StudentSource.objects.filter(user=self.user).count(), 1)
 
+    def test_upload_pdf_file(self):
+        response = self.upload_source(
+            filename='lesson.pdf',
+            content=b'%PDF-1.4\n%test\n',
+            content_type='application/pdf',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['source_type'], StudentSource.SourceType.PDF)
+
+    def test_upload_png_file(self):
+        response = self.upload_source(
+            filename='note.png',
+            content=b'\x89PNG\r\n\x1a\n',
+            content_type='image/png',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['source_type'], StudentSource.SourceType.IMAGE)
+
+    def test_upload_arabic_filename(self):
+        response = self.upload_source(filename='ملخص الرياضيات.txt')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        source = StudentSource.objects.get(id=response.data['id'])
+        self.assertEqual(source.original_filename, 'ملخص الرياضيات.txt')
+        self.assertNotIn('ملخص', source.file.name)
+
+    def test_reject_missing_extension(self):
+        response = self.upload_source(filename='README', content=b'text')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(StudentSource.objects.count(), 0)
+
     def test_reject_bad_extension(self):
         response = self.upload_source(filename='hack.exe', content=b'bad')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(StudentSource.objects.count(), 0)
+
+    def test_reject_missing_file(self):
+        self.authenticate()
+        response = self.client.post(
+            reverse('student-source-list'),
+            {'title': 'No File'},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(StudentSource.objects.count(), 0)
+
+    def test_reject_missing_title(self):
+        self.authenticate()
+        response = self.client.post(
+            reverse('student-source-list'),
+            {'file': SimpleUploadedFile('summary.txt', b'text', content_type='text/plain')},
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(StudentSource.objects.count(), 0)
+
+    def test_upload_requires_authentication(self):
+        response = self.client.post(
+            reverse('student-source-list'),
+            {
+                'title': 'No Token',
+                'file': SimpleUploadedFile('summary.txt', b'text', content_type='text/plain'),
+            },
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(StudentSource.objects.count(), 0)
+
+    def test_upload_without_subject_succeeds(self):
+        response = self.upload_source(subject=False)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data['subject'])
 
     def test_reject_too_large_file(self):
         response = self.upload_source(content=b'a' * (1024 * 1024 + 1))
@@ -204,3 +297,124 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertEqual(StudentSource.objects.filter(user=self.user).count(), 0)
+
+    def test_create_collection(self):
+        self.authenticate()
+        response = self.client.post(
+            reverse('student-source-collection-list'),
+            {'name': 'الرياضيات', 'subject': self.subject.id, 'description': 'مصادر الرياضيات'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['name'], 'الرياضيات')
+        self.assertEqual(StudentSourceCollection.objects.filter(user=self.user).count(), 1)
+
+    def test_list_only_own_collections(self):
+        own_collection = self.create_collection(name='Own Folder')
+        self.create_collection(user=self.other_user, name='Other Folder')
+        self.authenticate()
+
+        response = self.client.get(reverse('student-source-collection-list'))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results'] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['id'], own_collection.id)
+
+    def test_cannot_access_other_user_collection(self):
+        other_collection = self.create_collection(user=self.other_user, name='Other Folder')
+        self.authenticate()
+
+        response = self.client.get(reverse('student-source-collection-detail', args=[other_collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_upload_source_inside_collection(self):
+        collection = self.create_collection(name='Math Folder')
+        response = self.upload_source(collection=collection, subject=False)
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        source = StudentSource.objects.get(id=response.data['id'])
+        self.assertEqual(source.collection_id, collection.id)
+        self.assertEqual(source.subject_id, self.subject.id)
+
+    def test_collection_sources_endpoint(self):
+        collection = self.create_collection(name='Math Folder')
+        upload = self.upload_source(collection=collection)
+
+        response = self.client.get(reverse('student-source-collection-sources', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['id'], upload.data['id'])
+
+    def test_collection_capabilities(self):
+        collection = self.create_collection(name='Math Folder')
+        self.upload_source(collection=collection)
+
+        response = self.client.get(reverse('student-source-collection-capabilities', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['khota']['available'])
+        self.assertFalse(response.data['kholasa']['available'])
+
+    def test_use_collection_with_rasheed(self):
+        collection = self.create_collection(name='Math Folder')
+        self.upload_source(collection=collection)
+
+        response = self.client.post(reverse('student-source-collection-use-with-rasheed', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertIn('advice', response.data)
+
+    def test_use_collection_with_khota_does_not_500(self):
+        collection = self.create_collection(name='Math Folder')
+        self.upload_source(collection=collection)
+
+        response = self.client.post(reverse('student-source-collection-use-with-khota', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(StudyPlan.objects.filter(user=self.user).count(), 1)
+
+    def test_use_collection_with_fahes_does_not_500(self):
+        collection = self.create_collection(name='Math Folder')
+        upload = self.upload_source(collection=collection)
+        self.client.post(reverse('student-source-process', args=[upload.data['id']]))
+
+        response = self.client.post(reverse('student-source-collection-use-with-fahes', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(Quiz.objects.filter(user=self.user).count(), 1)
+
+    def test_collection_kholasa_unavailable(self):
+        collection = self.create_collection(name='Math Folder')
+        self.authenticate()
+
+        response = self.client.post(reverse('student-source-collection-use-with-kholasa', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['success'])
+        self.assertFalse(response.data['available'])
+
+    def test_collection_sada_unavailable(self):
+        collection = self.create_collection(name='Math Folder')
+        self.authenticate()
+
+        response = self.client.post(reverse('student-source-collection-use-with-sada', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['success'])
+        self.assertFalse(response.data['available'])
+
+    def test_delete_collection_with_sources_returns_400(self):
+        collection = self.create_collection(name='Math Folder')
+        self.upload_source(collection=collection)
+
+        response = self.client.delete(reverse('student-source-collection-detail', args=[collection.id]))
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertTrue(StudentSourceCollection.objects.filter(id=collection.id).exists())

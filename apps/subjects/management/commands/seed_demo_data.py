@@ -26,8 +26,12 @@ from apps.quizzes.services import calculate_attempt_result
 from apps.students.models import StudentProfile
 from apps.study_plans.models import StudyPlan, StudyTask
 from apps.study_plans.services import update_plan_completion
-from apps.sources.models import StudentSource, StudentSourceInteraction
-from apps.sources.services import use_source_with_character
+from apps.sources.models import (
+    StudentSource,
+    StudentSourceCollection,
+    StudentSourceInteraction,
+)
+from apps.sources.services import use_collection_with_character, use_source_with_character
 from apps.subjects.models import EducationStage, Subject, UserSubject
 
 
@@ -327,6 +331,7 @@ class Command(BaseCommand):
 
         stages = self._seed_stages()
         subjects = self._seed_subjects(stages)
+        arabic_subjects = self._ensure_required_arabic_demo_catalog()
         admin = self._seed_admin(User)
         project_admin = self._seed_project_admin(User)
         student = self._seed_student(User)
@@ -339,7 +344,7 @@ class Command(BaseCommand):
         attempt_created = self._seed_demo_attempt(student, quizzes['اختبار سريع في التفاضل'])
         demo_sources_count, demo_interactions_count = self._seed_demo_sources_and_interactions(
             student,
-            subjects,
+            arabic_subjects,
         )
 
         self.stdout.write(self.style.SUCCESS('Demo data seeded successfully.'))
@@ -395,6 +400,48 @@ class Command(BaseCommand):
                 },
             )
             subjects[(subject.name, subject.grade_level)] = subject
+            self._write_upsert('subject', f'{subject.name} ({subject.grade_level})', created)
+        return subjects
+
+    def _ensure_required_arabic_demo_catalog(self):
+        stage_payloads = [
+            ('المرحلة الإعدادية', 1),
+            ('المرحلة الثانوية', 2),
+            ('المرحلة الجامعية', 3),
+        ]
+        stages = {}
+        for name, order in stage_payloads:
+            stage, created = EducationStage.objects.update_or_create(
+                name=name,
+                defaults={
+                    'description': f'{name} ضمن بيانات برّاق التجريبية.',
+                    'order': order,
+                    'is_active': True,
+                },
+            )
+            stages[name] = stage
+            self._write_upsert('stage', stage.name, created)
+
+        subject_names = [
+            'الرياضيات',
+            'الفيزياء',
+            'الكيمياء',
+            'اللغة العربية',
+            'اللغة الإنجليزية',
+            'الأحياء',
+        ]
+        subjects = {}
+        for name in subject_names:
+            subject, created = Subject.objects.update_or_create(
+                name=name,
+                education_stage=stages['المرحلة الثانوية'],
+                grade_level='الثالث الثانوي',
+                defaults={
+                    'description': f'مادة {name} ضمن بيانات برّاق التجريبية.',
+                    'is_active': True,
+                },
+            )
+            subjects[name] = subject
             self._write_upsert('subject', f'{subject.name} ({subject.grade_level})', created)
         return subjects
 
@@ -724,6 +771,131 @@ class Command(BaseCommand):
         return True
 
     def _seed_demo_sources_and_interactions(self, student, subjects):
+        math_subject = subjects['الرياضيات']
+
+        math_collection, math_collection_created = StudentSourceCollection.objects.update_or_create(
+            user=student,
+            name='الرياضيات',
+            defaults={
+                'subject': math_subject,
+                'description': 'مصادر وملاحظات الرياضيات',
+                'color': '#2563eb',
+                'icon': 'calculator',
+                'status': StudentSourceCollection.Status.ACTIVE,
+            },
+        )
+        self._write_upsert('student source collection', math_collection.name, math_collection_created)
+
+        ai_collection, ai_collection_created = StudentSourceCollection.objects.update_or_create(
+            user=student,
+            name='محاضرات الذكاء الاصطناعي',
+            defaults={
+                'subject': None,
+                'description': 'محاضرات وملخصات الذكاء الاصطناعي',
+                'color': '#7c3aed',
+                'icon': 'brain',
+                'status': StudentSourceCollection.Status.ACTIVE,
+            },
+        )
+        self._write_upsert('student source collection', ai_collection.name, ai_collection_created)
+
+        source_payloads = [
+            {
+                'collection': math_collection,
+                'subject': math_subject,
+                'title': 'ملخص النهايات والمشتقات',
+                'description': 'ملخص نصي جاهز للتجربة داخل مجلد الرياضيات.',
+                'filename': 'demo_math_limits_derivatives.txt',
+                'text': (
+                    'ملخص النهايات والمشتقات\n'
+                    'النهايات تساعد على فهم سلوك الدالة قرب نقطة محددة.\n'
+                    'مشتقة x^2 هي 2x، وتستخدم المشتقات لقياس معدل التغير.\n'
+                    'عند حل مسائل التفاضل يجب تحديد القاعدة المناسبة ثم التحقق من الناتج.\n'
+                ),
+            },
+            {
+                'collection': ai_collection,
+                'subject': None,
+                'title': 'محاور ورشة الذكاء الاصطناعي للطلاب',
+                'description': 'مصدر نصي جاهز عن محاور ورشة الذكاء الاصطناعي.',
+                'filename': 'demo_ai_workshop_topics.txt',
+                'text': (
+                    'محاور ورشة الذكاء الاصطناعي للطلاب\n'
+                    'مقدمة في النماذج اللغوية وكيف تساعد الطلاب على تنظيم التعلم.\n'
+                    'أمثلة على صياغة الأسئلة، تلخيص الملاحظات، وتحويل الأفكار إلى خطة عمل.\n'
+                    'تنبيه مهم: يجب مراجعة المخرجات وعدم مشاركة البيانات الحساسة.\n'
+                ),
+            },
+        ]
+
+        created_sources = 0
+        created_interactions = 0
+        seeded_sources = []
+        for payload in source_payloads:
+            source, created = StudentSource.objects.update_or_create(
+                user=student,
+                title=payload['title'],
+                defaults={
+                    'collection': payload['collection'],
+                    'subject': payload['subject'],
+                    'description': payload['description'],
+                    'source_type': StudentSource.SourceType.TEXT,
+                    'original_filename': payload['filename'],
+                    'mime_type': 'text/plain',
+                    'extension': 'txt',
+                    'status': StudentSource.Status.READY,
+                    'extracted_text': payload['text'],
+                    'metadata': {'demo_seed': True},
+                },
+            )
+            if created or not source.file:
+                content = ContentFile(payload['text'].encode('utf-8'), name=payload['filename'])
+                source.file.save(payload['filename'], content, save=False)
+            source.file_size = source.file.size if source.file else len(payload['text'].encode('utf-8'))
+            source.status = StudentSource.Status.READY
+            source.save()
+            seeded_sources.append(source)
+            created_sources += 1
+            self._write_upsert('student source', source.title, created)
+
+        if not StudentSourceInteraction.objects.filter(
+            user=student,
+            collection=math_collection,
+            character=StudentSourceInteraction.Character.RASHEED,
+        ).exists():
+            use_collection_with_character(
+                student,
+                math_collection,
+                StudentSourceInteraction.Character.RASHEED,
+            )
+            created_interactions += 1
+
+        if not StudentSourceInteraction.objects.filter(
+            user=student,
+            collection=math_collection,
+            character=StudentSourceInteraction.Character.KHOTA,
+        ).exists():
+            use_collection_with_character(
+                student,
+                math_collection,
+                StudentSourceInteraction.Character.KHOTA,
+            )
+            created_interactions += 1
+
+        if not StudentSourceInteraction.objects.filter(
+            user=student,
+            source=seeded_sources[0],
+            character=StudentSourceInteraction.Character.FAHES,
+        ).exists():
+            use_source_with_character(
+                student,
+                seeded_sources[0],
+                StudentSourceInteraction.Character.FAHES,
+            )
+            created_interactions += 1
+
+        return created_sources, created_interactions
+
         subject = subjects[('الرياضيات', GRADE_LEVEL)]
         source, created = StudentSource.objects.get_or_create(
             user=student,

@@ -1,6 +1,22 @@
 from django.contrib import admin
 
-from .models import StudentSource, StudentSourceInteraction
+from .models import StudentSource, StudentSourceCollection, StudentSourceInteraction
+
+
+@admin.register(StudentSourceCollection)
+class StudentSourceCollectionAdmin(admin.ModelAdmin):
+    list_display = (
+        'name',
+        'user',
+        'subject',
+        'status',
+        'source_count',
+        'created_at',
+    )
+    list_filter = ('status', 'subject', 'created_at')
+    search_fields = ('name', 'description', 'user__email')
+    readonly_fields = ('created_at', 'updated_at')
+    autocomplete_fields = ('user', 'subject')
 
 
 @admin.register(StudentSource)
@@ -9,13 +25,14 @@ class StudentSourceAdmin(admin.ModelAdmin):
         'title',
         'user',
         'subject',
+        'collection',
         'source_type',
         'status',
         'file_size',
         'created_at',
     )
-    list_filter = ('source_type', 'status', 'subject', 'created_at')
-    search_fields = ('title', 'original_filename', 'user__email')
+    list_filter = ('source_type', 'status', 'subject', 'collection', 'created_at')
+    search_fields = ('title', 'original_filename', 'user__email', 'collection__name')
     readonly_fields = (
         'original_filename',
         'file_size',
@@ -24,7 +41,7 @@ class StudentSourceAdmin(admin.ModelAdmin):
         'created_at',
         'updated_at',
     )
-    autocomplete_fields = ('user', 'subject')
+    autocomplete_fields = ('user', 'subject', 'collection')
 
 
 @admin.register(StudentSourceInteraction)
@@ -32,6 +49,7 @@ class StudentSourceInteractionAdmin(admin.ModelAdmin):
     list_display = (
         'user',
         'source',
+        'collection',
         'character',
         'action',
         'status',
@@ -40,6 +58,6 @@ class StudentSourceInteractionAdmin(admin.ModelAdmin):
         'created_at',
     )
     list_filter = ('character', 'action', 'status', 'created_at')
-    search_fields = ('user__email', 'source__title', 'message')
-    autocomplete_fields = ('user', 'source')
+    search_fields = ('user__email', 'source__title', 'collection__name', 'message')
+    autocomplete_fields = ('user', 'source', 'collection')
     readonly_fields = ('created_at', 'updated_at')

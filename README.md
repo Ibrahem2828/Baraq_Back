@@ -643,6 +643,36 @@ AI gateway tests:
 python manage.py test apps.ai_gateway.tests
 ```
 
+Student Sources and Collections tests:
+
+```powershell
+python manage.py test apps.sources.tests
+```
+
+## Student Sources Media
+
+Run migrations after pulling source collection changes:
+
+```powershell
+python manage.py migrate
+python manage.py seed_demo_data
+```
+
+Demo credentials:
+
+- `admin@baraq.app / Admin@123456`
+- `project.admin@baraq.app / ProjectAdmin@123456`
+- `student@baraq.app / Student@123456`
+
+Docker uses `gunicorn` by default and persists uploads in the `media_data` volume mounted at `/app/media`. Keep `MEDIA_ROOT=/app/media` and `MEDIA_URL=/media/` in container environments.
+
+Smoke commands:
+
+```powershell
+python manage.py check
+python manage.py test apps.sources.tests
+```
+
 ## MVP Smoke Test Checklist
 
 Run these in order after migrations and seed data:
@@ -675,6 +705,16 @@ Phase 3.6 smoke additions:
 23. Call `GET /api/ai-gateway/health/`
 24. Create `StudyPlan` with `generation_type="ai"` in mock mode
 25. Create `Quiz` with `generation_type="ai"` in mock mode
+
+Student Sources smoke additions:
+
+26. `GET /api/student-source-collections/`
+27. `POST /api/student-source-collections/` with `{"name": "الرياضيات"}`
+28. `POST /api/student-sources/` as multipart with `title`, `collection`, and `file`
+29. `POST /api/student-sources/{id}/process/`
+30. `GET /api/student-source-collections/{id}/sources/`
+31. `GET /api/student-source-collections/{id}/capabilities/`
+32. Call collection character endpoints for Rasheed, Khota, Fahes, Kholasa, and Sada; none should return 500.
 
 ## Phase 4 Notes
 

@@ -93,6 +93,10 @@
         "completed",
         "unavailable",
         "failed"
+      ],
+      "StudentSourceCollectionStatus": [
+        "active",
+        "archived"
       ]
     },
     "schemas": {
@@ -3506,6 +3510,24 @@
             "field": "updated_at",
             "type": "datetime",
             "required": true
+          },
+          {
+            "field": "collection",
+            "type": "integer|null",
+            "required": false,
+            "example": 1
+          },
+          {
+            "field": "collection_id",
+            "type": "integer|null",
+            "required": false,
+            "example": 1
+          },
+          {
+            "field": "collection_name",
+            "type": "string|null",
+            "required": false,
+            "example": "?????????"
           }
         ]
       },
@@ -3518,6 +3540,26 @@
           "has_extracted_text",
           "processing_error",
           "metadata"
+        ],
+        "fields": [
+          {
+            "field": "collection",
+            "type": "integer|null",
+            "required": false,
+            "example": 1
+          },
+          {
+            "field": "collection_id",
+            "type": "integer|null",
+            "required": false,
+            "example": 1
+          },
+          {
+            "field": "collection_name",
+            "type": "string|null",
+            "required": false,
+            "example": "?????????"
+          }
         ]
       },
       "StudentSourceInteraction": {
@@ -3576,6 +3618,107 @@
           {
             "field": "created_at",
             "type": "datetime",
+            "required": true
+          }
+        ]
+      },
+      "StudentSourceCollection": {
+        "type": "object",
+        "fields": [
+          {
+            "field": "id",
+            "type": "integer",
+            "required": true,
+            "example": 1
+          },
+          {
+            "field": "name",
+            "type": "string",
+            "required": true,
+            "example": "?????????"
+          },
+          {
+            "field": "description",
+            "type": "string",
+            "required": false,
+            "example": "????? ???????? ?????????"
+          },
+          {
+            "field": "subject",
+            "type": "Subject|null",
+            "required": false
+          },
+          {
+            "field": "subject_name",
+            "type": "string|null",
+            "required": false,
+            "example": "?????????"
+          },
+          {
+            "field": "color",
+            "type": "string",
+            "required": false,
+            "example": "#2563eb"
+          },
+          {
+            "field": "icon",
+            "type": "string",
+            "required": false,
+            "example": "calculator"
+          },
+          {
+            "field": "status",
+            "type": "enum",
+            "required": true,
+            "enum": "StudentSourceCollectionStatus",
+            "example": "active"
+          },
+          {
+            "field": "source_count",
+            "type": "integer",
+            "required": true,
+            "example": 2
+          },
+          {
+            "field": "total_file_size",
+            "type": "integer",
+            "required": true,
+            "example": 4096
+          },
+          {
+            "field": "last_source_at",
+            "type": "datetime|null",
+            "required": false
+          },
+          {
+            "field": "created_at",
+            "type": "datetime",
+            "required": true
+          },
+          {
+            "field": "updated_at",
+            "type": "datetime",
+            "required": true
+          }
+        ]
+      },
+      "StudentSourceCollectionDetail": {
+        "type": "object",
+        "extends": "StudentSourceCollection",
+        "extra_fields": [
+          {
+            "field": "sources",
+            "type": "StudentSource[]",
+            "required": true
+          },
+          {
+            "field": "capabilities",
+            "type": "object",
+            "required": true
+          },
+          {
+            "field": "characters_summary",
+            "type": "object",
             "required": true
           }
         ]
@@ -10243,7 +10386,145 @@
             }
           }
         }
-      ]
+      ],
+      "upload_contract": {
+        "create_fields": {
+          "title": "required",
+          "description": "optional",
+          "subject": "optional",
+          "collection": "optional",
+          "file": "required",
+          "server_inferred": [
+            "user",
+            "source_type",
+            "file_size",
+            "mime_type",
+            "extension",
+            "status"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Student Source Collections",
+      "description": "Student-owned study folders/projects that group uploaded sources. All endpoints require Bearer auth and are scoped to request.user.",
+      "character_capabilities": {
+        "khota": "Creates a basic study plan from collection sources when a subject can be resolved.",
+        "fahes": "Creates a draft or text-based quiz from collection sources when a subject can be resolved.",
+        "rasheed": "Returns structured study advice for organizing the collection.",
+        "kholasa": "Unavailable now; returns a coming-soon message.",
+        "sada": "Unavailable now; returns a coming-soon message."
+      },
+      "endpoints": [
+        {
+          "name": "list",
+          "method": "GET",
+          "path": "/api/student-source-collections/",
+          "response": "Paginated<StudentSourceCollection>"
+        },
+        {
+          "name": "create",
+          "method": "POST",
+          "path": "/api/student-source-collections/",
+          "body": {
+            "name": "?????????",
+            "description": "????? ???????? ?????????",
+            "subject": 1,
+            "color": "#2563eb",
+            "icon": "calculator"
+          },
+          "response": "StudentSourceCollectionDetail"
+        },
+        {
+          "name": "detail",
+          "method": "GET",
+          "path": "/api/student-source-collections/{id}/",
+          "response": "StudentSourceCollectionDetail"
+        },
+        {
+          "name": "update",
+          "method": "PATCH",
+          "path": "/api/student-source-collections/{id}/",
+          "body": {
+            "name": "???? ???????",
+            "status": "active"
+          },
+          "response": "StudentSourceCollectionDetail"
+        },
+        {
+          "name": "delete",
+          "method": "DELETE",
+          "path": "/api/student-source-collections/{id}/",
+          "notes": "Returns 400 if the collection contains sources."
+        },
+        {
+          "name": "sources",
+          "method": "GET",
+          "path": "/api/student-source-collections/{id}/sources/",
+          "response": "StudentSource[]"
+        },
+        {
+          "name": "capabilities",
+          "method": "GET",
+          "path": "/api/student-source-collections/{id}/capabilities/",
+          "response": "Character capability object"
+        },
+        {
+          "name": "use_with_character",
+          "method": "POST",
+          "path": "/api/student-source-collections/{id}/use-with-character/",
+          "body": {
+            "character": "khota",
+            "action": "create_study_plan"
+          },
+          "response": "SourceCharacterResponse"
+        },
+        {
+          "name": "use_with_khota",
+          "method": "POST",
+          "path": "/api/student-source-collections/{id}/use-with-khota/"
+        },
+        {
+          "name": "use_with_fahes",
+          "method": "POST",
+          "path": "/api/student-source-collections/{id}/use-with-fahes/"
+        },
+        {
+          "name": "use_with_rasheed",
+          "method": "POST",
+          "path": "/api/student-source-collections/{id}/use-with-rasheed/"
+        },
+        {
+          "name": "use_with_kholasa",
+          "method": "POST",
+          "path": "/api/student-source-collections/{id}/use-with-kholasa/"
+        },
+        {
+          "name": "use_with_sada",
+          "method": "POST",
+          "path": "/api/student-source-collections/{id}/use-with-sada/"
+        }
+      ],
+      "examples": {
+        "upload_source_inside_collection": {
+          "method": "POST",
+          "path": "/api/student-sources/",
+          "content_type": "multipart/form-data",
+          "fields": {
+            "title": "???? ????????",
+            "description": "",
+            "subject": null,
+            "collection": 1,
+            "file": "<binary>"
+          }
+        }
+      },
+      "errors": {
+        "missing_file": "???? ?????? ??? ?????.",
+        "missing_title": "???? ????? ????? ??????.",
+        "delete_non_empty": "?? ???? ??? ???? ????? ??? ?????. ???? ??????? ?? ?????? ?????.",
+        "empty_collection": "??? ????? ??? ??? ?????? ?????."
+      }
     }
   ]
 }

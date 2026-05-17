@@ -1,4 +1,6 @@
 from drf_spectacular.utils import extend_schema_field
+from django.conf import settings
+from pathlib import Path
 from rest_framework import serializers
 
 from apps.quizzes.serializers import QuizListSerializer
@@ -6,8 +8,11 @@ from apps.study_plans.serializers import StudyPlanListSerializer
 from apps.subjects.models import Subject
 from apps.subjects.serializers import SubjectSerializer
 
-from .capabilities import get_source_character_capabilities
-from .models import StudentSource, StudentSourceInteraction
+from .capabilities import (
+    get_collection_character_capabilities,
+    get_source_character_capabilities,
+)
+from .models import StudentSource, StudentSourceCollection, StudentSourceInteraction
 from .validators import validate_student_source_file
 
 
@@ -17,6 +22,7 @@ class StudentSourceInteractionSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'source',
+            'collection',
             'character',
             'action',
             'status',
@@ -28,9 +34,116 @@ class StudentSourceInteractionSerializer(serializers.ModelSerializer):
         )
 
 
+class StudentSourceBriefSerializer(serializers.ModelSerializer):
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+    collection_name = serializers.CharField(source='collection.name', read_only=True)
+    collection_id = serializers.IntegerField(source='collection.id', read_only=True)
+
+    class Meta:
+        model = StudentSource
+        fields = (
+            'id',
+            'title',
+            'source_type',
+            'subject',
+            'subject_name',
+            'collection',
+            'collection_id',
+            'collection_name',
+            'original_filename',
+            'file_size',
+            'extension',
+            'status',
+            'created_at',
+        )
+
+
+class StudentSourceCollectionListSerializer(serializers.ModelSerializer):
+    subject = SubjectSerializer(read_only=True)
+    subject_name = serializers.CharField(source='subject.name', read_only=True)
+    source_count = serializers.IntegerField(read_only=True)
+    total_file_size = serializers.IntegerField(read_only=True)
+    last_source_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = StudentSourceCollection
+        fields = (
+            'id',
+            'name',
+            'description',
+            'subject',
+            'subject_name',
+            'color',
+            'icon',
+            'status',
+            'source_count',
+            'total_file_size',
+            'last_source_at',
+            'created_at',
+            'updated_at',
+        )
+
+
+class StudentSourceCollectionDetailSerializer(StudentSourceCollectionListSerializer):
+    sources = StudentSourceBriefSerializer(many=True, read_only=True)
+    capabilities = serializers.SerializerMethodField()
+    characters_summary = serializers.SerializerMethodField()
+
+    class Meta(StudentSourceCollectionListSerializer.Meta):
+        fields = StudentSourceCollectionListSerializer.Meta.fields + (
+            'sources',
+            'capabilities',
+            'characters_summary',
+        )
+
+    @extend_schema_field(serializers.DictField())
+    def get_capabilities(self, obj):
+        return get_collection_character_capabilities(obj)
+
+    @extend_schema_field(serializers.DictField())
+    def get_characters_summary(self, obj):
+        capabilities = get_collection_character_capabilities(obj)
+        return {
+            key: {
+                'available': value['available'],
+                'actions': value['actions'],
+                'message': value['message'],
+            }
+            for key, value in capabilities.items()
+        }
+
+
+class StudentSourceCollectionCreateUpdateSerializer(serializers.ModelSerializer):
+    subject = serializers.PrimaryKeyRelatedField(
+        queryset=Subject.objects.filter(is_active=True, education_stage__is_active=True),
+        required=False,
+        allow_null=True,
+    )
+    name = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        error_messages={
+            'required': 'يرجى إدخال اسم للمجلد.',
+            'blank': 'يرجى إدخال اسم للمجلد.',
+        },
+    )
+
+    class Meta:
+        model = StudentSourceCollection
+        fields = ('name', 'description', 'subject', 'color', 'icon', 'status')
+
+    def create(self, validated_data):
+        return StudentSourceCollection.objects.create(
+            user=self.context['request'].user,
+            **validated_data,
+        )
+
+
 class StudentSourceListSerializer(serializers.ModelSerializer):
     subject = SubjectSerializer(read_only=True)
     subject_name = serializers.CharField(source='subject.name', read_only=True)
+    collection_name = serializers.CharField(source='collection.name', read_only=True)
+    collection_id = serializers.IntegerField(source='collection.id', read_only=True)
     capabilities = serializers.SerializerMethodField()
 
     class Meta:
@@ -42,6 +155,9 @@ class StudentSourceListSerializer(serializers.ModelSerializer):
             'source_type',
             'subject',
             'subject_name',
+            'collection',
+            'collection_id',
+            'collection_name',
             'original_filename',
             'file_size',
             'mime_type',
@@ -108,18 +224,51 @@ class StudentSourceCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    collection = serializers.PrimaryKeyRelatedField(
+        queryset=StudentSourceCollection.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    title = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        error_messages={
+            'required': 'يرجى إدخال عنوان للمصدر.',
+            'blank': 'يرجى إدخال عنوان للمصدر.',
+        },
+    )
+    file = serializers.FileField(
+        required=True,
+        allow_empty_file=False,
+        error_messages={
+            'required': 'يرجى اختيار ملف لرفعه.',
+            'empty': 'الملف فارغ. يرجى اختيار ملف صالح.',
+        },
+    )
 
     class Meta:
         model = StudentSource
-        fields = ('id', 'title', 'description', 'subject', 'file')
+        fields = ('id', 'title', 'description', 'subject', 'collection', 'file')
         read_only_fields = ('id',)
+
+    def validate_collection(self, value):
+        if value and value.user_id != self.context['request'].user.id:
+            raise serializers.ValidationError('المجلد غير موجود أو لا تملك صلاحية استخدامه.')
+        return value
 
     def validate_file(self, value):
         self.context['file_metadata'] = validate_student_source_file(value)
         return value
 
+    def validate(self, attrs):
+        collection = attrs.get('collection')
+        if collection and attrs.get('subject') is None and collection.subject_id:
+            attrs['subject'] = collection.subject
+        return attrs
+
     def create(self, validated_data):
         file_metadata = self.context['file_metadata']
+        Path(settings.MEDIA_ROOT).mkdir(parents=True, exist_ok=True)
         return StudentSource.objects.create(
             user=self.context['request'].user,
             original_filename=file_metadata['original_filename'],
@@ -137,10 +286,20 @@ class StudentSourceUpdateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
+    collection = serializers.PrimaryKeyRelatedField(
+        queryset=StudentSourceCollection.objects.all(),
+        required=False,
+        allow_null=True,
+    )
 
     class Meta:
         model = StudentSource
-        fields = ('title', 'description', 'subject')
+        fields = ('title', 'description', 'subject', 'collection')
+
+    def validate_collection(self, value):
+        if value and value.user_id != self.context['request'].user.id:
+            raise serializers.ValidationError('المجلد غير موجود أو لا تملك صلاحية استخدامه.')
+        return value
 
 
 class UseWithCharacterSerializer(serializers.Serializer):

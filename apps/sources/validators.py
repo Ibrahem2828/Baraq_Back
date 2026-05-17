@@ -58,11 +58,17 @@ EXTENSION_SOURCE_TYPES = {
 def get_safe_extension(filename):
     extension = Path(filename or '').suffix.lower().lstrip('.')
     if not extension:
-        raise ValidationError({'file': 'File extension is required.'})
+        raise ValidationError(
+            {'file': 'تعذر تحديد نوع الملف. تأكد أن الملف يحتوي على امتداد صحيح.'}
+        )
     if extension in DANGEROUS_EXTENSIONS:
-        raise ValidationError({'file': f'Files with .{extension} extension are not allowed.'})
+        raise ValidationError(
+            {'file': f'هذا النوع من الملفات غير مسموح به: .{extension}'}
+        )
     if extension not in ALLOWED_EXTENSIONS:
-        raise ValidationError({'file': f'Unsupported file extension .{extension}.'})
+        raise ValidationError(
+            {'file': f'نوع الملف غير مدعوم: .{extension}'}
+        )
     return extension
 
 
@@ -79,16 +85,16 @@ def get_source_type_from_file(file):
 
 def validate_student_source_file(file):
     if file is None:
-        raise ValidationError({'file': 'File is required.'})
+        raise ValidationError({'file': 'يرجى اختيار ملف لرفعه.'})
 
     size = getattr(file, 'size', 0) or 0
     if size <= 0:
-        raise ValidationError({'file': 'File is empty.'})
+        raise ValidationError({'file': 'الملف فارغ. يرجى اختيار ملف صالح.'})
 
     max_mb = getattr(settings, 'STUDENT_SOURCE_MAX_UPLOAD_MB', 25)
     max_bytes = max_mb * 1024 * 1024
     if size > max_bytes:
-        raise ValidationError({'file': f'Maximum upload size is {max_mb}MB.'})
+        raise ValidationError({'file': f'حجم الملف أكبر من الحد المسموح ({max_mb}MB).'})
 
     extension = get_safe_extension(getattr(file, 'name', ''))
     mime_type = get_file_mime_type(file)
