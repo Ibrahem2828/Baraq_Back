@@ -69,6 +69,8 @@ INSTALLED_APPS = [
     'apps.quizzes',
     'apps.sources',
     'apps.ai_gateway',
+    'apps.subscriptions.apps.SubscriptionsConfig',
+    'apps.admin_dashboard',
 ]
 
 MIDDLEWARE = [
@@ -215,6 +217,10 @@ SPECTACULAR_SETTINGS = {
         'SourceCharacterEnum': 'apps.sources.models.StudentSourceInteraction.Character',
         'SourceInteractionActionEnum': 'apps.sources.models.StudentSourceInteraction.Action',
         'SourceInteractionStatusEnum': 'apps.sources.models.StudentSourceInteraction.Status',
+        'SubscriptionBillingIntervalEnum': 'apps.subscriptions.models.SubscriptionPlan.BillingInterval',
+        'UserSubscriptionStatusEnum': 'apps.subscriptions.models.UserSubscription.Status',
+        'SubscriptionProviderEnum': 'apps.subscriptions.models.UserSubscription.Provider',
+        'SubscriptionEventTypeEnum': 'apps.subscriptions.models.SubscriptionEvent.EventType',
     },
 }
 

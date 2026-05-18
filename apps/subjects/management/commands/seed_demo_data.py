@@ -8,6 +8,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
+from apps.admin_dashboard.services import assign_roles_to_user, seed_default_rbac
 from apps.quizzes.models import (
     AttemptStatusChoices,
     Choice,
@@ -33,6 +34,11 @@ from apps.sources.models import (
 )
 from apps.sources.services import use_collection_with_character, use_source_with_character
 from apps.subjects.models import EducationStage, Subject, UserSubject
+from apps.subscriptions.services import (
+    change_user_plan,
+    ensure_default_plans,
+    get_or_create_user_subscription,
+)
 
 
 ADMIN_EMAIL = 'admin@baraq.app'
@@ -319,6 +325,11 @@ class Command(BaseCommand):
             action='store_true',
             help='Delete only demo users and their owned demo data before reseeding.',
         )
+        parser.add_argument(
+            '--reset-demo-passwords',
+            action='store_true',
+            help='Reset passwords for existing demo users.',
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
@@ -332,9 +343,25 @@ class Command(BaseCommand):
         stages = self._seed_stages()
         subjects = self._seed_subjects(stages)
         arabic_subjects = self._ensure_required_arabic_demo_catalog()
-        admin = self._seed_admin(User)
-        project_admin = self._seed_project_admin(User)
-        student = self._seed_student(User)
+        permissions, roles = seed_default_rbac()
+        subscription_plans = ensure_default_plans()
+        admin = self._seed_admin(User, roles, options['reset_demo_passwords'])
+        project_admin = self._seed_project_admin(
+            User,
+            roles,
+            admin,
+            options['reset_demo_passwords'],
+        )
+        student = self._seed_student(User, options['reset_demo_passwords'])
+        student_subscription = get_or_create_user_subscription(student)
+        if student_subscription.plan_id != subscription_plans['free'].id:
+            student_subscription = change_user_plan(
+                student,
+                subscription_plans['free'],
+                actor=admin,
+                metadata={'demo_seed': True},
+            )
+        get_or_create_user_subscription(project_admin)
         self._seed_student_profile(student, stages['المرحلة الثانوية'])
         selected_subjects_count = self._seed_user_subjects(student, subjects)
         plans = self._seed_study_plans(student, subjects, today, week_start)
@@ -359,6 +386,15 @@ class Command(BaseCommand):
         self.stdout.write(f'Demo submitted attempt: {"yes" if attempt_created else "no"}')
         self.stdout.write(f'Demo student sources: {demo_sources_count}')
         self.stdout.write(f'Demo source interactions: {demo_interactions_count}')
+        self.stdout.write(f'Admin permissions: {len(permissions)}')
+        self.stdout.write(f'Admin roles: {len(roles)}')
+        self.stdout.write(
+            'Subscription plans: '
+            + ', '.join(plan.code for plan in subscription_plans.values())
+        )
+        self.stdout.write(
+            f'Demo student subscription: {student.email} -> {student_subscription.plan.code}'
+        )
         self.stdout.write('')
         self.stdout.write(self.style.WARNING('Demo credentials only. Change them before production.'))
         self.stdout.write(f'Admin: {admin.email} / {ADMIN_PASSWORD}')
@@ -445,7 +481,7 @@ class Command(BaseCommand):
             self._write_upsert('subject', f'{subject.name} ({subject.grade_level})', created)
         return subjects
 
-    def _seed_admin(self, User):
+    def _seed_admin(self, User, roles, reset_password):
         admin, created = User.objects.update_or_create(
             email=ADMIN_EMAIL,
             defaults={
@@ -457,12 +493,14 @@ class Command(BaseCommand):
                 'is_superuser': True,
             },
         )
-        admin.set_password(ADMIN_PASSWORD)
-        admin.save()
+        if created or reset_password:
+            admin.set_password(ADMIN_PASSWORD)
+            admin.save()
+        assign_roles_to_user(admin, [roles['super_admin']], assigned_by=admin)
         self._write_upsert('admin user', admin.email, created)
         return admin
 
-    def _seed_project_admin(self, User):
+    def _seed_project_admin(self, User, roles, assigned_by, reset_password):
         project_admin, created = User.objects.update_or_create(
             email=PROJECT_ADMIN_EMAIL,
             defaults={
@@ -474,12 +512,14 @@ class Command(BaseCommand):
                 'is_superuser': False,
             },
         )
-        project_admin.set_password(PROJECT_ADMIN_PASSWORD)
-        project_admin.save()
+        if created or reset_password:
+            project_admin.set_password(PROJECT_ADMIN_PASSWORD)
+            project_admin.save()
+        assign_roles_to_user(project_admin, [roles['admin']], assigned_by=assigned_by)
         self._write_upsert('project admin user', project_admin.email, created)
         return project_admin
 
-    def _seed_student(self, User):
+    def _seed_student(self, User, reset_password):
         student, created = User.objects.update_or_create(
             email=STUDENT_EMAIL,
             defaults={
@@ -491,8 +531,9 @@ class Command(BaseCommand):
                 'is_superuser': False,
             },
         )
-        student.set_password(STUDENT_PASSWORD)
-        student.save()
+        if created or reset_password:
+            student.set_password(STUDENT_PASSWORD)
+            student.save()
         self._write_upsert('student user', student.email, created)
         return student
 

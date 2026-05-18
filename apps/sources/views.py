@@ -9,6 +9,14 @@ from apps.quizzes.selectors import get_user_quiz_detail
 from apps.quizzes.serializers import QuizListSerializer
 from apps.study_plans.selectors import get_user_study_plan_queryset
 from apps.study_plans.serializers import StudyPlanListSerializer
+from apps.subscriptions.services import (
+    can_create_collection,
+    can_upload_source,
+    can_use_character,
+    consume_character_request,
+    consume_collection_created,
+    consume_source_uploaded,
+)
 
 from .capabilities import (
     get_collection_character_capabilities,
@@ -100,9 +108,11 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
             raise ValidationError({'title': 'يرجى إدخال عنوان للمصدر.'})
         if request.FILES.get('file') is None:
             raise ValidationError({'file': 'يرجى اختيار ملف لرفعه.'})
+        can_upload_source(request.user, request.FILES['file'].size)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         source = serializer.save()
+        consume_source_uploaded(request.user, source.file_size)
         output_serializer = StudentSourceDetailSerializer(
             source,
             context=self.get_serializer_context(),
@@ -171,12 +181,16 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
         source = self.get_object()
         serializer = UseWithCharacterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if self._character_is_available(source, serializer.validated_data['character']):
+            can_use_character(request.user, serializer.validated_data['character'])
         result = use_source_with_character(
             request.user,
             source,
             serializer.validated_data['character'],
             action=serializer.validated_data.get('action'),
         )
+        if result.get('success') is True:
+            consume_character_request(request.user, serializer.validated_data['character'])
         return Response(self._build_character_response(result))
 
     @action(detail=True, methods=['post'], url_path='use-with-khota')
@@ -201,8 +215,16 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
 
     def _use_with_fixed_character(self, character):
         source = self.get_object()
+        if self._character_is_available(source, character):
+            can_use_character(self.request.user, character)
         result = use_source_with_character(self.request.user, source, character)
+        if result.get('success') is True:
+            consume_character_request(self.request.user, character)
         return Response(self._build_character_response(result))
+
+    def _character_is_available(self, source, character):
+        capability = get_source_character_capabilities(source).get(character)
+        return bool(capability and capability.get('available'))
 
     def _build_character_response(self, result):
         payload = {
@@ -279,9 +301,11 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
         responses={201: StudentSourceCollectionDetailSerializer},
     )
     def create(self, request, *args, **kwargs):
+        can_create_collection(request.user)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         collection = serializer.save()
+        consume_collection_created(request.user)
         output_serializer = StudentSourceCollectionDetailSerializer(
             collection,
             context=self.get_serializer_context(),
@@ -341,12 +365,16 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
         collection = self.get_object()
         serializer = UseWithCharacterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        if self._character_is_available(collection, serializer.validated_data['character']):
+            can_use_character(request.user, serializer.validated_data['character'])
         result = use_collection_with_character(
             request.user,
             collection,
             serializer.validated_data['character'],
             action=serializer.validated_data.get('action'),
         )
+        if result.get('success') is True:
+            consume_character_request(request.user, serializer.validated_data['character'])
         return Response(self._build_character_response(result))
 
     @action(detail=True, methods=['post'], url_path='use-with-khota')
@@ -371,8 +399,16 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
 
     def _use_with_fixed_character(self, character):
         collection = self.get_object()
+        if self._character_is_available(collection, character):
+            can_use_character(self.request.user, character)
         result = use_collection_with_character(self.request.user, collection, character)
+        if result.get('success') is True:
+            consume_character_request(self.request.user, character)
         return Response(self._build_character_response(result))
+
+    def _character_is_available(self, collection, character):
+        capability = get_collection_character_capabilities(collection).get(character)
+        return bool(capability and capability.get('available'))
 
     def _build_character_response(self, result):
         payload = {

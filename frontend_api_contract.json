@@ -10525,6 +10525,182 @@
         "delete_non_empty": "?? ???? ??? ???? ????? ??? ?????. ???? ??????? ?? ?????? ?????.",
         "empty_collection": "??? ????? ??? ??? ?????? ?????."
       }
+    },
+    {
+      "name": "admin_dashboard",
+      "base_path": "/api/admin/",
+      "auth": "Bearer JWT; admin dashboard RBAC required",
+      "notes": "Additive Admin Dashboard API section. Existing student APIs are unchanged.",
+      "endpoints": [
+        {
+          "name": "me",
+          "method": "GET",
+          "path": "/api/admin/me/",
+          "permission": "admin dashboard user",
+          "response": "AdminMe"
+        },
+        {
+          "name": "overview",
+          "method": "GET",
+          "path": "/api/admin/overview/",
+          "permission": "dashboard.view"
+        },
+        {
+          "name": "permissions",
+          "method": "GET",
+          "path": "/api/admin/permissions/",
+          "permission": "roles.view"
+        },
+        {
+          "name": "roles",
+          "methods": ["GET", "POST", "PATCH", "DELETE"],
+          "path": "/api/admin/roles/",
+          "permissions": ["roles.view", "roles.create", "roles.update", "roles.delete"]
+        },
+        {
+          "name": "admin_users",
+          "methods": ["GET", "POST", "PATCH", "DELETE"],
+          "path": "/api/admin/admin-users/",
+          "permissions": ["admins.view", "admins.create", "admins.update", "admins.delete"]
+        },
+        {
+          "name": "assign_roles",
+          "method": "POST",
+          "path": "/api/admin/admin-users/{id}/assign-roles/",
+          "permission": "admins.assign_roles"
+        },
+        {
+          "name": "users",
+          "methods": ["GET", "PATCH"],
+          "path": "/api/admin/users/",
+          "permissions": ["users.view", "users.update"]
+        },
+        {
+          "name": "suspend_user",
+          "method": "POST",
+          "path": "/api/admin/users/{id}/suspend/",
+          "permission": "users.suspend"
+        },
+        {
+          "name": "activate_user",
+          "method": "POST",
+          "path": "/api/admin/users/{id}/activate/",
+          "permission": "users.activate"
+        },
+        {
+          "name": "sources",
+          "methods": ["GET", "DELETE"],
+          "path": "/api/admin/sources/",
+          "permissions": ["sources.view", "sources.delete"]
+        },
+        {
+          "name": "collections",
+          "method": "GET",
+          "path": "/api/admin/source-collections/",
+          "permission": "collections.view"
+        },
+        {
+          "name": "study_plans",
+          "method": "GET",
+          "path": "/api/admin/study-plans/",
+          "permission": "study_plans.view"
+        },
+        {
+          "name": "quizzes",
+          "method": "GET",
+          "path": "/api/admin/quizzes/",
+          "permission": "quizzes.view"
+        },
+        {
+          "name": "quiz_attempts",
+          "method": "GET",
+          "path": "/api/admin/quiz-attempts/",
+          "permission": "quiz_attempts.view"
+        },
+        {
+          "name": "character_interactions",
+          "method": "GET",
+          "path": "/api/admin/character-interactions/",
+          "permission": "character_interactions.view"
+        },
+        {
+          "name": "audit_logs",
+          "method": "GET",
+          "path": "/api/admin/audit-logs/",
+          "permission": "audit_logs.view"
+        },
+        {
+          "name": "system_health",
+          "method": "GET",
+          "path": "/api/admin/system/health/",
+          "permission": "system.health"
+        }
+      ]
+    },
+    {
+      "name": "subscriptions",
+      "base_path": "/api/subscriptions/",
+      "auth": "Bearer JWT",
+      "notes": "Student-facing subscription read APIs. No payment provider is integrated in this phase.",
+      "endpoints": [
+        {
+          "name": "my_subscription",
+          "method": "GET",
+          "path": "/api/subscriptions/me/",
+          "response": "MySubscription"
+        },
+        {
+          "name": "public_plans",
+          "method": "GET",
+          "path": "/api/subscriptions/plans/",
+          "response": "SubscriptionPlan[]"
+        }
+      ],
+      "limit_errors": [
+        "collection_limit_reached",
+        "source_limit_reached",
+        "file_size_limit_exceeded",
+        "storage_limit_exceeded",
+        "character_not_allowed",
+        "character_limit_reached"
+      ]
+    },
+    {
+      "name": "admin_subscriptions",
+      "base_path": "/api/admin/",
+      "auth": "Bearer JWT; admin dashboard RBAC required",
+      "endpoints": [
+        {
+          "name": "subscription_plans",
+          "methods": ["GET", "POST", "PATCH", "DELETE"],
+          "path": "/api/admin/subscription-plans/",
+          "permissions": ["subscription_plans.view", "subscription_plans.create", "subscription_plans.update", "subscription_plans.delete"]
+        },
+        {
+          "name": "user_subscriptions",
+          "methods": ["GET", "PATCH"],
+          "path": "/api/admin/user-subscriptions/",
+          "permissions": ["subscriptions.view", "subscriptions.update"]
+        },
+        {
+          "name": "change_subscription",
+          "method": "POST",
+          "path": "/api/admin/users/{id}/change-subscription/",
+          "permission": "subscriptions.update"
+        },
+        {
+          "name": "cancel_subscription",
+          "method": "POST",
+          "path": "/api/admin/users/{id}/cancel-subscription/",
+          "permission": "subscriptions.cancel"
+        },
+        {
+          "name": "subscription_usage",
+          "method": "GET",
+          "path": "/api/admin/subscription-usage/",
+          "permission": "subscriptions.view"
+        }
+      ]
     }
   ]
 }

@@ -5,6 +5,7 @@ env/
 __pycache__/
 *.py[cod]
 *.sqlite3
+*.sqlite3-journal
 db.sqlite3
 .pytest_cache/
 .mypy_cache/

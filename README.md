@@ -725,3 +725,5 @@ Student Sources smoke additions:
 - `short_answer` grading can later move to a reviewed or AI-assisted flow.
 - `QuestionBankItem` can later be promoted into a richer reusable question bank.
 - Quiz progress logs are ready for future analytics and recommendation services.
+- Admin dashboard backend readiness is documented in `ADMIN_DASHBOARD.md`; all admin APIs are additive under `/api/admin/`.
+- Subscription core and student/admin subscription APIs are documented in `SUBSCRIPTIONS.md`.
