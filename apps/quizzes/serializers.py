@@ -173,11 +173,7 @@ class QuizCreateSerializer(serializers.ModelSerializer):
             'time_limit_minutes',
             'question_types',
         )
-
-    def validate_questions_count(self, value):
-        if value < 1 or value > 50:
-            raise serializers.ValidationError('questions_count must be between 1 and 50.')
-        return value
+        read_only_fields = ('questions_count',)
 
     def validate_generation_type(self, value):
         if value not in {GenerationTypeChoices.MANUAL, GenerationTypeChoices.AI}:
@@ -203,6 +199,20 @@ class QuizUpdateSerializer(serializers.ModelSerializer):
             'status',
             'time_limit_minutes',
         )
+
+    def validate(self, attrs):
+        requested_status = attrs.get('status')
+        if requested_status == QuizStatusChoices.PUBLISHED:
+            raise serializers.ValidationError({'status': 'Use the publish action so questions are validated first.'})
+        if self.instance and self.instance.status == QuizStatusChoices.ARCHIVED:
+            raise serializers.ValidationError('Archived quizzes cannot be edited.')
+        if self.instance and self.instance.status == QuizStatusChoices.PUBLISHED:
+            editable = set(attrs) - {'status'}
+            if editable:
+                raise serializers.ValidationError('Published quiz content is immutable. Archive it or create a new draft.')
+            if requested_status not in {None, QuizStatusChoices.ARCHIVED}:
+                raise serializers.ValidationError({'status': 'A published quiz may only be archived.'})
+        return attrs
 
     def update(self, instance, validated_data):
         return update_quiz(instance, validated_data)
@@ -288,7 +298,10 @@ class QuizAttemptDetailSerializer(serializers.ModelSerializer):
 
 
 class StartAttemptSerializer(serializers.Serializer):
-    pass
+    """The start action intentionally accepts an empty JSON object."""
+
+    def validate(self, attrs):
+        return attrs
 
 
 class QuizAttemptStartResponseSerializer(serializers.Serializer):
@@ -352,3 +365,73 @@ class QuestionBankItemSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
         )
+
+
+class ChoiceManageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Choice
+        fields = ("id", "text", "is_correct", "order")
+        read_only_fields = ("id",)
+
+
+class QuizQuestionManageSerializer(serializers.ModelSerializer):
+    choices = ChoiceManageSerializer(many=True, required=False)
+
+    class Meta:
+        model = Question
+        fields = (
+            "id", "quiz", "text", "question_type", "difficulty_level", "explanation", "order", "points", "choices",
+        )
+        read_only_fields = ("id",)
+
+    def validate_quiz(self, quiz):
+        request = self.context["request"]
+        if quiz.user_id != request.user.id:
+            raise serializers.ValidationError("You do not own this quiz.")
+        if quiz.generation_type != GenerationTypeChoices.MANUAL or quiz.status != QuizStatusChoices.DRAFT:
+            raise serializers.ValidationError("Only manual draft quizzes can be edited.")
+        return quiz
+
+    def validate(self, attrs):
+        question_type = attrs.get("question_type", getattr(self.instance, "question_type", QuestionTypeChoices.MCQ))
+        if question_type == QuestionTypeChoices.SHORT_ANSWER:
+            raise serializers.ValidationError({'question_type': 'Short-answer grading is not enabled yet.'})
+        choices = attrs.get("choices")
+        if choices is not None and question_type in {QuestionTypeChoices.MCQ, QuestionTypeChoices.TRUE_FALSE}:
+            if len(choices) < 2:
+                raise serializers.ValidationError({"choices": "At least two choices are required."})
+            normalized = [item["text"].strip().casefold() for item in choices]
+            if len(normalized) != len(set(normalized)):
+                raise serializers.ValidationError({"choices": "Choices must be unique."})
+            if sum(1 for item in choices if item.get("is_correct")) != 1:
+                raise serializers.ValidationError({"choices": "Exactly one choice must be correct."})
+        return attrs
+
+    @staticmethod
+    def _replace_choices(question, choices):
+        question.choices.all().delete()
+        Choice.objects.bulk_create([
+            Choice(question=question, text=item["text"], is_correct=item.get("is_correct", False), order=item.get("order", index))
+            for index, item in enumerate(choices, start=1)
+        ])
+
+    def create(self, validated_data):
+        from django.db import transaction
+        choices = validated_data.pop("choices", [])
+        with transaction.atomic():
+            question = Question.objects.create(**validated_data)
+            self._replace_choices(question, choices)
+            from .services import _sync_quiz_questions_count
+            _sync_quiz_questions_count(question.quiz)
+        return question
+
+    def update(self, instance, validated_data):
+        from django.db import transaction
+        choices = validated_data.pop("choices", None)
+        with transaction.atomic():
+            for field, value in validated_data.items():
+                setattr(instance, field, value)
+            instance.save()
+            if choices is not None:
+                self._replace_choices(instance, choices)
+        return instance

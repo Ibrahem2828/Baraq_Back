@@ -3,7 +3,7 @@ from pathlib import Path
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.db.models import Count, Q
+from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from drf_spectacular.utils import extend_schema
@@ -14,6 +14,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.quizzes.models import Quiz, QuizAttempt
+from apps.notifications.models import Notification
+from apps.support.models import SupportTicket
+from apps.ai_integration.models import AIFeedback, AIJob
+from apps.common.health import cache_status, database_status, storage_status
 from apps.sources.models import (
     StudentSource,
     StudentSourceCollection,
@@ -134,6 +138,16 @@ class AdminOverviewView(APIView):
             'premium_users_count': UserSubscription.objects.filter(plan__code='premium').count(),
             'pro_users_count': UserSubscription.objects.filter(plan__code='pro').count(),
             'school_users_count': UserSubscription.objects.filter(plan__code='school').count(),
+            'ai_jobs_count': AIJob.objects.count(),
+            'ai_jobs_pending_count': AIJob.objects.filter(status__in=[AIJob.Status.CREATED, AIJob.Status.QUEUED, AIJob.Status.SUBMITTED, AIJob.Status.PROCESSING, AIJob.Status.VALIDATING]).count(),
+            'ai_jobs_failed_count': AIJob.objects.filter(status=AIJob.Status.FAILED).count(),
+            'ai_jobs_completed_count': AIJob.objects.filter(status=AIJob.Status.COMPLETED).count(),
+            'ai_feedback_count': AIFeedback.objects.count(),
+            'ai_average_rating': AIFeedback.objects.aggregate(value=Avg('rating'))['value'],
+            'notifications_count': Notification.objects.count(),
+            'unread_notifications_count': Notification.objects.filter(read_at__isnull=True).count(),
+            'support_tickets_count': SupportTicket.objects.count(),
+            'open_support_tickets_count': SupportTicket.objects.exclude(status__in=[SupportTicket.Status.RESOLVED, SupportTicket.Status.CLOSED]).count(),
             'subscriptions_by_plan': list(
                 UserSubscription.objects.values('plan__code', 'plan__name')
                 .annotate(count=Count('id'))
@@ -570,23 +584,42 @@ class SystemHealthView(APIView):
 
 
 def build_system_health():
-    database_status = 'ok'
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT 1')
-            cursor.fetchone()
-    except Exception:
-        database_status = 'error'
-
     media_root = Path(settings.MEDIA_ROOT)
     static_root = Path(settings.STATIC_ROOT)
     return {
-        'database': database_status,
+        'database': database_status(),
+        'cache': cache_status(),
+        'storage': storage_status(),
         'media_root_exists': media_root.exists(),
         'media_root_writable': media_root.exists() and media_root.is_dir(),
         'static_root_exists': static_root.exists(),
+        'ai_service_enabled': settings.AI_SERVICE_ENABLED,
         'app_name': settings.APP_NAME,
+        'app_version': settings.APP_VERSION,
         'app_phase': settings.APP_PHASE,
+        'environment': settings.ENVIRONMENT,
         'debug': settings.DEBUG,
         'allowed_hosts_count': len(settings.ALLOWED_HOSTS),
     }
+
+
+@extend_schema(tags=['Admin Dashboard'])
+class AdminApiRootView(APIView):
+    permission_classes = [IsAdminDashboardUser]
+
+    def get(self, request):
+        base = request.build_absolute_uri('/').rstrip('/')
+        return Response({
+            'me': f'{base}/api/v1/admin/me/',
+            'overview': f'{base}/api/v1/admin/overview/',
+            'system_health': f'{base}/api/v1/admin/system/health/',
+            'users': f'{base}/api/v1/admin/users/',
+            'roles': f'{base}/api/v1/admin/roles/',
+            'subjects': f'{base}/api/v1/admin/subjects/',
+            'sources': f'{base}/api/v1/admin/sources/',
+            'quizzes': f'{base}/api/v1/admin/quizzes/',
+            'study_plans': f'{base}/api/v1/admin/study-plans/',
+            'ai_jobs': f'{base}/api/v1/admin/ai-jobs/',
+            'support_tickets': f'{base}/api/v1/admin/support-tickets/',
+            'subscriptions': f'{base}/api/v1/admin/user-subscriptions/',
+        })

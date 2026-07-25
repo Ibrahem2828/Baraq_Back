@@ -1,113 +1,78 @@
 from django.conf import settings
-from django.db import DatabaseError, connection
-from drf_spectacular.utils import OpenApiExample, extend_schema, inline_serializer
+from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import permissions, serializers, status
 from rest_framework.views import APIView
 
+from .health import readiness_payload
 from .responses import error_response, success_response
 
 
-SUCCESS_WRAPPER_SERIALIZER = inline_serializer(
-    name='SystemSuccessResponse',
+HEALTH_RESPONSE = inline_serializer(
+    name="HealthResponse",
     fields={
-        'success': serializers.BooleanField(),
-        'message': serializers.CharField(),
-        'data': serializers.JSONField(),
-        'meta': serializers.JSONField(required=False),
+        "success": serializers.BooleanField(),
+        "message": serializers.CharField(),
+        "data": serializers.JSONField(),
     },
 )
 
 
-class HealthCheckView(APIView):
+class LivenessView(APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
-    @extend_schema(
-        tags=['System'],
-        description='Return backend health information and verify database connectivity.',
-        responses={200: SUCCESS_WRAPPER_SERIALIZER, 503: SUCCESS_WRAPPER_SERIALIZER},
-        examples=[
-            OpenApiExample(
-                'Healthy Response',
-                value={
-                    'success': True,
-                    'message': 'Health check completed successfully',
-                    'data': {
-                        'status': 'ok',
-                        'service': 'baraq_backend',
-                        'database': 'ok',
-                        'version': 'phase-3.6',
-                    },
-                },
-                response_only=True,
-            )
-        ],
-    )
+    @extend_schema(tags=["System"], responses={200: HEALTH_RESPONSE})
     def get(self, request):
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute('SELECT 1')
-                cursor.fetchone()
-        except DatabaseError:
-            return error_response(
-                message='Health check failed',
-                errors={
-                    'status': 'degraded',
-                    'service': 'baraq_backend',
-                    'database': 'error',
-                    'version': f'phase-{settings.APP_PHASE}',
-                },
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                code='service_unavailable',
-            )
-
         return success_response(
             data={
-                'status': 'ok',
-                'service': 'baraq_backend',
-                'database': 'ok',
-                'version': f'phase-{settings.APP_PHASE}',
+                "status": "ok",
+                "service": "baraq_backend",
+                "version": settings.APP_VERSION,
             },
-            message='Health check completed successfully',
+            message="Service is alive.",
         )
+
+
+class ReadinessView(APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    @extend_schema(tags=["System"], responses={200: HEALTH_RESPONSE, 503: HEALTH_RESPONSE})
+    def get(self, request):
+        checks, ready = readiness_payload()
+        data = {
+            "status": "ready" if ready else "degraded",
+            "service": "baraq_backend",
+            "version": settings.APP_VERSION,
+            "checks": checks,
+        }
+        if not ready:
+            return error_response(
+                message="Service is not ready.",
+                errors=data,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                code="service_not_ready",
+            )
+        return success_response(data=data, message="Service is ready.")
+
+
+class HealthCheckView(ReadinessView):
+    """Backward-compatible readiness endpoint."""
 
 
 class ProjectMetaView(APIView):
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
 
-    @extend_schema(
-        tags=['System'],
-        description='Return backend metadata and feature flags for local development clients.',
-        responses={200: SUCCESS_WRAPPER_SERIALIZER},
-        examples=[
-            OpenApiExample(
-                'Meta Response',
-                value={
-                    'success': True,
-                    'message': 'Project metadata loaded successfully',
-                    'data': {
-                        'name': 'Baraq Backend',
-                        'phase': '3.6',
-                        'features': {
-                            'auth': True,
-                            'study_plans': True,
-                            'quizzes': True,
-                            'ai_gateway': True,
-                            'audio': False,
-                            'summaries': False,
-                            'analytics': False,
-                        },
-                    },
-                },
-                response_only=True,
-            )
-        ],
-    )
+    @extend_schema(tags=["System"])
     def get(self, request):
         return success_response(
             data={
-                'name': settings.APP_NAME,
-                'phase': settings.APP_PHASE,
-                'features': settings.APP_FEATURES,
+                "name": settings.APP_NAME,
+                "version": settings.APP_VERSION,
+                "api_version": settings.API_VERSION,
+                "environment": settings.ENVIRONMENT,
+                "features": settings.APP_FEATURES,
             },
-            message='Project metadata loaded successfully',
+            message="Project metadata loaded successfully.",
         )

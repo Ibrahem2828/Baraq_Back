@@ -23,13 +23,15 @@ DEFAULT_ERROR_CODES = {
 }
 
 
-def _build_error_payload(message, errors=None, code=None, extra=None):
+def _build_error_payload(message, errors=None, code=None, extra=None, request_id=None):
     payload = {
         'success': False,
         'message': message,
         'errors': errors if errors is not None else {},
         'code': code,
     }
+    if request_id:
+        payload['request_id'] = request_id
     if extra:
         payload.update(extra)
     return payload
@@ -37,6 +39,7 @@ def _build_error_payload(message, errors=None, code=None, extra=None):
 
 def custom_exception_handler(exc, context):
     response = exception_handler(exc, context)
+    request_id = getattr(context.get('request'), 'request_id', None)
 
     if response is None:
         errors = {}
@@ -47,6 +50,7 @@ def custom_exception_handler(exc, context):
                 message=DEFAULT_ERROR_MESSAGES[status.HTTP_500_INTERNAL_SERVER_ERROR],
                 errors=errors,
                 code=DEFAULT_ERROR_CODES[status.HTTP_500_INTERNAL_SERVER_ERROR],
+                request_id=request_id,
             ),
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
@@ -66,6 +70,7 @@ def custom_exception_handler(exc, context):
                 message=DEFAULT_ERROR_MESSAGES[status.HTTP_400_BAD_REQUEST],
                 errors=data,
                 code=code,
+                request_id=request_id,
                 extra=dict(data),
             )
         else:
@@ -74,6 +79,7 @@ def custom_exception_handler(exc, context):
                 message=message,
                 errors=data,
                 code=code,
+                request_id=request_id,
             )
             if detail is not None:
                 payload['detail'] = detail
@@ -82,6 +88,7 @@ def custom_exception_handler(exc, context):
             message=DEFAULT_ERROR_MESSAGES.get(status_code, 'Request failed'),
             errors=data,
             code=code,
+            request_id=request_id,
             extra={'detail': data},
         )
     else:
@@ -89,6 +96,7 @@ def custom_exception_handler(exc, context):
             message=str(data),
             errors={'detail': data},
             code=code,
+            request_id=request_id,
             extra={'detail': data},
         )
 

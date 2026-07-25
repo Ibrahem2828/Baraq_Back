@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 env/
@@ -14,4 +16,9 @@ staticfiles/
 media/
 htmlcov/
 .coverage
+coverage.xml
+celerybeat-schedule*
+*.log
+.idea/
+.vscode/
 .DS_Store

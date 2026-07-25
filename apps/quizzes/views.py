@@ -4,7 +4,7 @@ from rest_framework import filters, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import Choice, Quiz, QuizAttempt, StudentAnswer
+from .models import Choice, GenerationTypeChoices, Question, Quiz, QuizAttempt, QuizStatusChoices, StudentAnswer
 from .permissions import CanAccessQuestionBankItem, IsQuizOwner
 from .selectors import (
     get_attempt_detail,
@@ -23,6 +23,7 @@ from .serializers import (
     QuizListSerializer,
     QuizResultSerializer,
     QuizUpdateSerializer,
+    QuizQuestionManageSerializer,
     StartAttemptSerializer,
     SubmitAnswerSerializer,
     SubmitQuizSerializer,
@@ -34,6 +35,7 @@ from .services import (
     start_quiz_attempt,
     submit_answer,
     submit_quiz_attempt,
+    publish_quiz,
 )
 
 
@@ -108,7 +110,7 @@ class QuizViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        description='Create a quiz and generate its initial questions using manual or mock AI generation.',
+        description='Create a manual draft quiz. AI quizzes are created through the AI jobs API.',
         request=QuizCreateSerializer,
         responses={201: QuizDetailSerializer},
         examples=[
@@ -122,7 +124,6 @@ class QuizViewSet(viewsets.ModelViewSet):
                     'difficulty_level': 'medium',
                     'quiz_type': 'practice',
                     'generation_type': 'manual',
-                    'questions_count': 5,
                     'time_limit_minutes': 15,
                     'question_types': ['mcq', 'true_false'],
                 },
@@ -191,6 +192,43 @@ class QuizViewSet(viewsets.ModelViewSet):
         quiz = get_user_quiz_detail(request.user, quiz.id)
         serializer = QuizDetailSerializer(quiz, context=self.get_serializer_context())
         return Response(serializer.data)
+
+    @extend_schema(description='Validate and publish a manual draft quiz.', responses={200: QuizDetailSerializer})
+    @action(detail=True, methods=['post'], url_path='publish')
+    def publish(self, request, pk=None):
+        quiz = publish_quiz(self.get_object())
+        quiz = get_user_quiz_detail(request.user, quiz.id)
+        return Response(QuizDetailSerializer(quiz, context=self.get_serializer_context()).data)
+
+
+@extend_schema(tags=['Quiz Questions'])
+class QuizQuestionViewSet(viewsets.ModelViewSet):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = QuizQuestionManageSerializer
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        queryset = Question.objects.filter(quiz__user=self.request.user).select_related('quiz').prefetch_related('choices')
+        quiz_id = self.request.query_params.get('quiz')
+        if quiz_id:
+            queryset = queryset.filter(quiz_id=quiz_id)
+        return queryset
+
+    def perform_update(self, serializer):
+        question = self.get_object()
+        if question.quiz.status != QuizStatusChoices.DRAFT or question.quiz.generation_type != GenerationTypeChoices.MANUAL:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError('Only manual draft quizzes can be edited.')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.quiz.status != QuizStatusChoices.DRAFT or instance.quiz.generation_type != GenerationTypeChoices.MANUAL:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError('Only manual draft quizzes can be edited.')
+        quiz = instance.quiz
+        instance.delete()
+        from .services import _sync_quiz_questions_count
+        _sync_quiz_questions_count(quiz)
 
 
 @extend_schema(tags=['Attempts'])

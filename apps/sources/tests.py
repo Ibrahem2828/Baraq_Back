@@ -8,11 +8,11 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.quizzes.models import Quiz
-from apps.study_plans.models import StudyPlan
+from apps.ai_integration.models import AIJob
 from apps.subjects.models import EducationStage, Subject
 
 from .models import StudentSource, StudentSourceCollection, StudentSourceInteraction
+from .services import process_source
 
 User = get_user_model()
 
@@ -222,14 +222,16 @@ class StudentSourceAPITestCase(APITestCase):
 
     def test_process_txt(self):
         upload = self.upload_source()
-        source_id = upload.data['id']
+        source = StudentSource.objects.get(pk=upload.data['id'])
 
-        response = self.client.post(reverse('student-source-process', args=[source_id]))
+        response = self.client.post(reverse('student-source-process', args=[source.id]))
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertTrue(response.data['success'])
-        self.assertEqual(response.data['source']['status'], StudentSource.Status.READY)
-        self.assertTrue(response.data['source']['has_extracted_text'])
+        result = process_source(source)
+        source.refresh_from_db()
+        self.assertTrue(result['success'])
+        self.assertEqual(source.status, StudentSource.Status.READY)
+        self.assertTrue(source.extracted_text)
 
     def test_source_capabilities(self):
         upload = self.upload_source()
@@ -251,7 +253,8 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertIn('advice', response.data)
+        self.assertIn('ai_job', response.data)
+        self.assertEqual(response.data['ai_job']['task_type'], AIJob.TaskType.RASHEED_RECOMMENDATIONS)
 
     def test_use_with_khota_does_not_fail(self):
         upload = self.upload_source()
@@ -260,7 +263,7 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertEqual(StudyPlan.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(response.data['ai_job']['task_type'], AIJob.TaskType.KHOTA_GENERATE_PLAN)
 
     def test_use_with_fahes_does_not_fail(self):
         upload = self.upload_source()
@@ -270,25 +273,21 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertEqual(Quiz.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(response.data['ai_job']['task_type'], AIJob.TaskType.FAHES_GENERATE_QUIZ)
 
     def test_kholasa_unavailable(self):
         upload = self.upload_source()
 
         response = self.client.post(reverse('student-source-use-with-kholasa', args=[upload.data['id']]))
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data['success'])
-        self.assertFalse(response.data['available'])
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_sada_unavailable(self):
         upload = self.upload_source()
 
         response = self.client.post(reverse('student-source-use-with-sada', args=[upload.data['id']]))
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data['success'])
-        self.assertFalse(response.data['available'])
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_delete_source(self):
         upload = self.upload_source()
@@ -367,7 +366,8 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertIn('advice', response.data)
+        self.assertIn('ai_job', response.data)
+        self.assertEqual(response.data['ai_job']['task_type'], AIJob.TaskType.RASHEED_RECOMMENDATIONS)
 
     def test_use_collection_with_khota_does_not_500(self):
         collection = self.create_collection(name='Math Folder')
@@ -377,7 +377,7 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertEqual(StudyPlan.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(response.data['ai_job']['task_type'], AIJob.TaskType.KHOTA_GENERATE_PLAN)
 
     def test_use_collection_with_fahes_does_not_500(self):
         collection = self.create_collection(name='Math Folder')
@@ -388,7 +388,7 @@ class StudentSourceAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertEqual(Quiz.objects.filter(user=self.user).count(), 1)
+        self.assertEqual(response.data['ai_job']['task_type'], AIJob.TaskType.FAHES_GENERATE_QUIZ)
 
     def test_collection_kholasa_unavailable(self):
         collection = self.create_collection(name='Math Folder')
@@ -396,9 +396,7 @@ class StudentSourceAPITestCase(APITestCase):
 
         response = self.client.post(reverse('student-source-collection-use-with-kholasa', args=[collection.id]))
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data['success'])
-        self.assertFalse(response.data['available'])
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_collection_sada_unavailable(self):
         collection = self.create_collection(name='Math Folder')
@@ -406,9 +404,7 @@ class StudentSourceAPITestCase(APITestCase):
 
         response = self.client.post(reverse('student-source-collection-use-with-sada', args=[collection.id]))
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data['success'])
-        self.assertFalse(response.data['available'])
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_delete_collection_with_sources_returns_400(self):
         collection = self.create_collection(name='Math Folder')

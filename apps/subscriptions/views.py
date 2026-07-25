@@ -32,7 +32,8 @@ class MySubscriptionView(APIView):
 @extend_schema(tags=['Subscriptions'])
 class PublicSubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PublicSubscriptionPlanSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['code', 'name', 'description']
     ordering_fields = ['sort_order', 'price', 'code']
@@ -173,3 +174,15 @@ class AdminSubscriptionUsageViewSet(AdminSubscriptionPermissionMixin, viewsets.R
         if plan:
             queryset = queryset.filter(subscription__plan__code=plan)
         return queryset
+
+
+class SubscriptionApiRootView(APIView):
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get(self, request):
+        base = request.build_absolute_uri('/').rstrip('/')
+        return Response({
+            'plans': f'{base}/api/v1/subscriptions/plans/',
+            'my_subscription': f'{base}/api/v1/subscriptions/me/',
+        })

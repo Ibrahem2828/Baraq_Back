@@ -72,9 +72,22 @@ def get_user_subscription(user):
     return get_or_create_user_subscription(user)
 
 
+def subscription_has_entitlement(subscription, now=None):
+    if subscription is None:
+        return False
+    now = now or timezone.now()
+    if subscription.status not in {UserSubscription.Status.ACTIVE, UserSubscription.Status.TRIALING}:
+        return False
+    if subscription.status == UserSubscription.Status.TRIALING and subscription.trial_ends_at and subscription.trial_ends_at <= now:
+        return False
+    if subscription.current_period_end and subscription.current_period_end <= now:
+        return False
+    return True
+
+
 def get_user_plan(user):
     subscription = get_user_subscription(user)
-    return subscription.plan if subscription else get_free_plan()
+    return subscription.plan if subscription_has_entitlement(subscription) else get_free_plan()
 
 
 def get_user_limits(user):
@@ -314,3 +327,67 @@ def subscription_summary_for_user(user):
         'features': get_user_features(user),
         'remaining': get_remaining_limits(user),
     }
+
+@transaction.atomic
+def reserve_character_request(user, character):
+    """Atomically validate and reserve one AI request.
+
+    The older can_use/consume pair remains for compatibility. New asynchronous AI
+    jobs should use this method to prevent concurrent requests from exceeding a plan.
+    """
+    features = get_user_features(user)
+    feature_key = CHARACTER_FEATURE_KEYS.get(character)
+    if feature_key and not features.get(feature_key, False):
+        raise SubscriptionFeatureNotAllowed(
+            'هذه الشخصية غير متاحة في خطتك الحالية.',
+            code='character_not_allowed',
+            character=character,
+        )
+
+    usage = get_or_create_current_usage(user)
+    usage = SubscriptionUsage.objects.select_for_update().get(pk=usage.pk)
+    limits = get_user_limits(user)
+
+    general_limit = limit_value(limits, 'max_ai_requests_per_month')
+    if general_limit is not None and usage.ai_requests_used >= general_limit:
+        _raise_limit(
+            'لقد استهلكت الحد الشهري لطلبات الذكاء الاصطناعي.',
+            'ai_request_limit_reached',
+            general_limit,
+            usage.ai_requests_used,
+        )
+
+    limit_key = CHARACTER_LIMIT_KEYS.get(character)
+    usage_field = CHARACTER_USAGE_FIELDS.get(character)
+    if usage_field:
+        character_limit = limit_value(limits, limit_key)
+        used = getattr(usage, usage_field)
+        if character_limit is not None and used >= character_limit:
+            _raise_limit(
+                f'لقد استهلكت حد استخدام {character} لهذا الشهر.',
+                'character_limit_reached',
+                character_limit,
+                used,
+            )
+        setattr(usage, usage_field, used + 1)
+    usage.ai_requests_used += 1
+    update_fields = ['ai_requests_used', 'updated_at']
+    if usage_field:
+        update_fields.append(usage_field)
+    usage.save(update_fields=update_fields)
+    return usage
+
+
+@transaction.atomic
+def refund_character_request(user, character):
+    """Refund one reserved request after a canceled/failed job."""
+    usage = get_or_create_current_usage(user)
+    usage = SubscriptionUsage.objects.select_for_update().get(pk=usage.pk)
+    usage_field = CHARACTER_USAGE_FIELDS.get(character)
+    usage.ai_requests_used = max(usage.ai_requests_used - 1, 0)
+    update_fields = ['ai_requests_used', 'updated_at']
+    if usage_field:
+        setattr(usage, usage_field, max(getattr(usage, usage_field) - 1, 0))
+        update_fields.append(usage_field)
+    usage.save(update_fields=update_fields)
+    return usage

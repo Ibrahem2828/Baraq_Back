@@ -4,6 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
+from django.db import transaction
 
 from apps.quizzes.selectors import get_user_quiz_detail
 from apps.quizzes.serializers import QuizListSerializer
@@ -12,8 +13,6 @@ from apps.study_plans.serializers import StudyPlanListSerializer
 from apps.subscriptions.services import (
     can_create_collection,
     can_upload_source,
-    can_use_character,
-    consume_character_request,
     consume_collection_created,
     consume_source_uploaded,
 )
@@ -23,6 +22,8 @@ from .capabilities import (
     get_source_character_capabilities,
 )
 from .models import StudentSource, StudentSourceCollection, StudentSourceInteraction
+from apps.ai_integration.serializers import AIJobSerializer
+
 from .serializers import (
     SourceCharacterResponseSerializer,
     StudentSourceBriefSerializer,
@@ -36,7 +37,8 @@ from .serializers import (
     StudentSourceUpdateSerializer,
     UseWithCharacterSerializer,
 )
-from .services import process_source, use_collection_with_character, use_source_with_character
+from .services import use_collection_with_character, use_source_with_character
+from .tasks import process_source_task
 
 
 @extend_schema(tags=['Student Sources'])
@@ -48,6 +50,11 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at', 'file_size']
     ordering = ['-created_at']
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_throttles(self):
+        ai_actions = {'use_with_character', 'use_with_khota', 'use_with_fahes', 'use_with_rasheed', 'use_with_kholasa', 'use_with_sada'}
+        self.throttle_scope = 'uploads' if self.action in {'create', 'process'} else ('ai_requests' if self.action in ai_actions else None)
+        return super().get_throttles()
 
     def get_queryset(self):
         queryset = StudentSource.objects.select_related(
@@ -108,11 +115,14 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
             raise ValidationError({'title': 'يرجى إدخال عنوان للمصدر.'})
         if request.FILES.get('file') is None:
             raise ValidationError({'file': 'يرجى اختيار ملف لرفعه.'})
-        can_upload_source(request.user, request.FILES['file'].size)
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        source = serializer.save()
-        consume_source_uploaded(request.user, source.file_size)
+        with transaction.atomic():
+            locked_user = request.user.__class__.objects.select_for_update().get(pk=request.user.pk)
+            can_upload_source(locked_user, request.FILES['file'].size)
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            source = serializer.save()
+            consume_source_uploaded(locked_user, source.file_size)
+            transaction.on_commit(lambda: process_source_task.delay(source.pk))
         output_serializer = StudentSourceDetailSerializer(
             source,
             context=self.get_serializer_context(),
@@ -147,18 +157,22 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
     @extend_schema(
         methods=['POST'],
         responses=StudentSourceDetailSerializer,
-        description='Process the source. TXT is read synchronously; other types are saved for later processing.',
+        description='Queue source processing and return immediately.',
     )
     @action(detail=True, methods=['post'], url_path='process')
     def process(self, request, pk=None):
         source = self.get_object()
-        result = process_source(source)
-        source.refresh_from_db()
-        serializer = StudentSourceDetailSerializer(
-            source,
-            context=self.get_serializer_context(),
+        if source.status == StudentSource.Status.PROCESSING:
+            return Response(
+                {'message': 'المصدر قيد المعالجة بالفعل.', 'source': StudentSourceDetailSerializer(source, context=self.get_serializer_context()).data},
+                status=status.HTTP_202_ACCEPTED,
+            )
+        transaction.on_commit(lambda: process_source_task.delay(source.pk))
+        serializer = StudentSourceDetailSerializer(source, context=self.get_serializer_context())
+        return Response(
+            {'message': 'تمت إضافة المصدر إلى طابور المعالجة.', 'source': serializer.data},
+            status=status.HTTP_202_ACCEPTED,
         )
-        return Response({'success': result['success'], 'message': result['message'], 'source': serializer.data})
 
     @extend_schema(
         methods=['GET'],
@@ -181,16 +195,12 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
         source = self.get_object()
         serializer = UseWithCharacterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if self._character_is_available(source, serializer.validated_data['character']):
-            can_use_character(request.user, serializer.validated_data['character'])
         result = use_source_with_character(
             request.user,
             source,
             serializer.validated_data['character'],
             action=serializer.validated_data.get('action'),
         )
-        if result.get('success') is True:
-            consume_character_request(request.user, serializer.validated_data['character'])
         return Response(self._build_character_response(result))
 
     @action(detail=True, methods=['post'], url_path='use-with-khota')
@@ -215,11 +225,7 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
 
     def _use_with_fixed_character(self, character):
         source = self.get_object()
-        if self._character_is_available(source, character):
-            can_use_character(self.request.user, character)
         result = use_source_with_character(self.request.user, source, character)
-        if result.get('success') is True:
-            consume_character_request(self.request.user, character)
         return Response(self._build_character_response(result))
 
     def _character_is_available(self, source, character):
@@ -232,6 +238,10 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
             for key, value in result.items()
             if key not in {'interaction', 'study_plan', 'quiz'}
         }
+
+        ai_job = result.get('ai_job')
+        if ai_job:
+            payload['ai_job'] = AIJobSerializer(ai_job).data
 
         interaction = result.get('interaction')
         if interaction:
@@ -301,11 +311,13 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
         responses={201: StudentSourceCollectionDetailSerializer},
     )
     def create(self, request, *args, **kwargs):
-        can_create_collection(request.user)
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        collection = serializer.save()
-        consume_collection_created(request.user)
+        with transaction.atomic():
+            locked_user = request.user.__class__.objects.select_for_update().get(pk=request.user.pk)
+            can_create_collection(locked_user)
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            collection = serializer.save()
+            consume_collection_created(locked_user)
         output_serializer = StudentSourceCollectionDetailSerializer(
             collection,
             context=self.get_serializer_context(),
@@ -365,16 +377,12 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
         collection = self.get_object()
         serializer = UseWithCharacterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if self._character_is_available(collection, serializer.validated_data['character']):
-            can_use_character(request.user, serializer.validated_data['character'])
         result = use_collection_with_character(
             request.user,
             collection,
             serializer.validated_data['character'],
             action=serializer.validated_data.get('action'),
         )
-        if result.get('success') is True:
-            consume_character_request(request.user, serializer.validated_data['character'])
         return Response(self._build_character_response(result))
 
     @action(detail=True, methods=['post'], url_path='use-with-khota')
@@ -399,11 +407,7 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
 
     def _use_with_fixed_character(self, character):
         collection = self.get_object()
-        if self._character_is_available(collection, character):
-            can_use_character(self.request.user, character)
         result = use_collection_with_character(self.request.user, collection, character)
-        if result.get('success') is True:
-            consume_character_request(self.request.user, character)
         return Response(self._build_character_response(result))
 
     def _character_is_available(self, collection, character):
@@ -416,6 +420,10 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
             for key, value in result.items()
             if key not in {'interaction', 'study_plan', 'quiz'}
         }
+
+        ai_job = result.get('ai_job')
+        if ai_job:
+            payload['ai_job'] = AIJobSerializer(ai_job).data
 
         interaction = result.get('interaction')
         if interaction:

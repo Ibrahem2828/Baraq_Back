@@ -138,7 +138,7 @@ class StudyPlanViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        description='Create a manual or mock-AI study plan and auto-generate its initial tasks.',
+        description='Create a manual study plan. AI plans are created through the AI jobs API.',
         request=StudyPlanCreateSerializer,
         responses={201: StudyPlanDetailSerializer},
         examples=[

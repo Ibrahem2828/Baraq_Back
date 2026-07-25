@@ -1,13 +1,9 @@
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from uuid import uuid4
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.utils import timezone
-
-from apps.ai_gateway.schemas import GenerateStudyPlanRequest
-from apps.ai_gateway.services import generate_study_plan as generate_ai_study_plan
 
 from .models import StudyPlan, StudyPlanProgressLog, StudyTask
 
@@ -39,66 +35,6 @@ def _get_priority_for_difficulty(difficulty_level):
     return StudyTask.Priority.MEDIUM
 
 
-def _get_student_level(user, subject):
-    try:
-        profile = user.student_profile
-    except ObjectDoesNotExist:
-        profile = None
-
-    if profile:
-        if profile.grade_level:
-            return profile.grade_level
-        if profile.education_stage_id:
-            return profile.education_stage.name
-
-    return subject.grade_level or subject.education_stage.name
-
-
-def _normalize_task_priority(value, fallback):
-    valid_priorities = {choice for choice, _label in StudyTask.Priority.choices}
-    return value if value in valid_priorities else fallback
-
-
-def _create_tasks_from_ai_gateway(plan, ai_response):
-    tasks = []
-    default_priority = _get_priority_for_difficulty(plan.difficulty_level)
-    max_offset = max((plan.end_date - plan.start_date).days, 0)
-
-    for index, payload in enumerate(ai_response.tasks, start=1):
-        day_number = payload.get('day_number', 1)
-        try:
-            day_offset = max(int(day_number) - 1, 0)
-        except (TypeError, ValueError):
-            day_offset = 0
-
-        task_date = plan.start_date + timedelta(days=min(day_offset, max_offset))
-        estimated_minutes = payload.get('estimated_minutes') or plan.daily_study_minutes
-        order = payload.get('order') or index
-
-        tasks.append(
-            StudyTask(
-                plan=plan,
-                title=payload.get('title') or f"Review {plan.subject.name} concepts",
-                description=payload.get('description')
-                or plan.goal
-                or f"Focused study session for {plan.subject.name}.",
-                task_date=task_date,
-                estimated_minutes=max(int(estimated_minutes), 1),
-                priority=_normalize_task_priority(
-                    payload.get('priority'),
-                    default_priority,
-                ),
-                order=max(int(order), 1),
-            )
-        )
-
-    if not tasks:
-        return generate_plan_tasks(plan)
-
-    StudyTask.objects.bulk_create(tasks)
-    return tasks
-
-
 @transaction.atomic
 def create_manual_plan(user, validated_data):
     plan = StudyPlan.objects.create(
@@ -113,46 +49,6 @@ def create_manual_plan(user, validated_data):
         plan=plan,
         action=StudyPlanProgressLog.Action.PLAN_CREATED,
         metadata={'generation_type': StudyPlan.GenerationType.MANUAL},
-    )
-    update_plan_completion(plan)
-    return plan
-
-
-@transaction.atomic
-def create_ai_plan(user, validated_data):
-    ai_request_id = f"ai-gateway-plan-{uuid4().hex}"
-    subject = validated_data['subject']
-    plan_data = validated_data.copy()
-    ai_response = generate_ai_study_plan(
-        GenerateStudyPlanRequest(
-            student_level=_get_student_level(user, subject),
-            subject=subject.name,
-            days=(plan_data['end_date'] - plan_data['start_date']).days + 1,
-            daily_minutes=plan_data['daily_study_minutes'],
-            difficulty_level=plan_data['difficulty_level'],
-            goal=plan_data.get('goal', ''),
-        )
-    )
-    if not plan_data.get('title'):
-        plan_data['title'] = ai_response.plan_title
-
-    plan = StudyPlan.objects.create(
-        user=user,
-        generation_type=StudyPlan.GenerationType.AI,
-        status=StudyPlan.Status.ACTIVE,
-        ai_request_id=ai_request_id,
-        **plan_data,
-    )
-    _create_tasks_from_ai_gateway(plan, ai_response)
-    _log_progress(
-        user=user,
-        plan=plan,
-        action=StudyPlanProgressLog.Action.PLAN_CREATED,
-        metadata={
-            'generation_type': StudyPlan.GenerationType.AI,
-            'ai_request_id': ai_request_id,
-            'source': 'ai_gateway',
-        },
     )
     update_plan_completion(plan)
     return plan

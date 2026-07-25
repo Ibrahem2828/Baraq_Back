@@ -1,13 +1,10 @@
+from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from uuid import uuid4
 
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-
-from apps.ai_gateway.schemas import GenerateQuizRequest
-from apps.ai_gateway.services import generate_quiz as generate_ai_quiz
 
 from .models import (
     AttemptStatusChoices,
@@ -54,6 +51,18 @@ def _quantize_score(value):
     return Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
 
+def _attempt_deadline(attempt):
+    limit = attempt.quiz.time_limit_minutes
+    if not limit:
+        return None
+    return attempt.started_at + timedelta(minutes=limit)
+
+
+def _attempt_has_expired(attempt, *, grace_seconds=15):
+    deadline = _attempt_deadline(attempt)
+    return bool(deadline and timezone.now() > deadline + timedelta(seconds=grace_seconds))
+
+
 def _create_question_bank_item(quiz, question, choices):
     QuestionBankItem.objects.create(
         subject=quiz.subject,
@@ -79,154 +88,25 @@ def _create_question_bank_item(quiz, question, choices):
     )
 
 
-def generate_mock_questions(quiz, question_types):
-    normalized_types = _normalize_question_types(question_types)
-    created_questions = []
-
-    for index in range(quiz.questions_count):
-        question_type = normalized_types[index % len(normalized_types)]
-        order = index + 1
-        topic_text = quiz.topic or quiz.subject.name
-        question_text = (
-            f"Question {order} about {topic_text} in {quiz.subject.name}. "
-            f"Choose the best answer."
-        )
-        explanation = f"Review the concept of {topic_text} in {quiz.subject.name}."
-
-        if question_type == QuestionTypeChoices.TRUE_FALSE:
-            question_text = (
-                f"Statement {order}: {topic_text} is part of {quiz.subject.name}. "
-                f"Decide whether it is true or false."
-            )
-        elif question_type == QuestionTypeChoices.SHORT_ANSWER:
-            question_text = (
-                f"Briefly explain key idea {order} from {topic_text} in {quiz.subject.name}."
-            )
-
-        question = Question.objects.create(
-            quiz=quiz,
-            text=question_text,
-            question_type=question_type,
-            difficulty_level=quiz.difficulty_level,
-            explanation=explanation,
-            order=order,
-            points=1,
-        )
-
-        created_choices = []
-        if question_type == QuestionTypeChoices.MCQ:
-            correct_order = (index % 4) + 1
-            for choice_order in range(1, 5):
-                choice = Choice.objects.create(
-                    question=question,
-                    text=(
-                        f"{quiz.subject.name} option {choice_order} for "
-                        f"{topic_text} question {order}"
-                    ),
-                    is_correct=choice_order == correct_order,
-                    order=choice_order,
-                )
-                created_choices.append(choice)
-        elif question_type == QuestionTypeChoices.TRUE_FALSE:
-            true_is_correct = index % 2 == 0
-            created_choices = [
-                Choice.objects.create(
-                    question=question,
-                    text='True',
-                    is_correct=true_is_correct,
-                    order=1,
-                ),
-                Choice.objects.create(
-                    question=question,
-                    text='False',
-                    is_correct=not true_is_correct,
-                    order=2,
-                ),
-            ]
-
-        _create_question_bank_item(quiz, question, created_choices)
-        created_questions.append(question)
-
-    _sync_quiz_questions_count(quiz)
-    _log_quiz_event(
-        user=quiz.user,
-        quiz=quiz,
-        action=QuizLogActionChoices.QUIZ_GENERATED,
-        metadata={
-            'generation_type': quiz.generation_type,
-            'questions_count': quiz.questions_count,
-            'question_types': normalized_types,
-        },
-    )
-    return created_questions
-
-
-def generate_ai_quiz_mock(user, validated_data):
-    question_types = _normalize_question_types(validated_data.get('question_types'))
-    ai_request_id = f"ai-gateway-quiz-{uuid4().hex}"
-    ai_response = generate_ai_quiz(
-        GenerateQuizRequest(
-            subject=validated_data['subject'].name,
-            topic=validated_data.get('topic') or validated_data['subject'].name,
-            difficulty_level=validated_data['difficulty_level'],
-            questions_count=validated_data['questions_count'],
-            question_types=question_types,
-        )
-    )
-
-    return {
-        'ai_request_id': ai_request_id,
-        'question_types': question_types,
-        'questions': ai_response.questions,
-    }
-
-
-def _create_questions_from_payload(quiz, questions_payload):
-    created_questions = []
-    for payload in questions_payload:
-        choices_payload = payload.pop('choices', [])
-        question = Question.objects.create(quiz=quiz, **payload)
-        created_choices = [
-            Choice.objects.create(question=question, **choice_payload)
-            for choice_payload in choices_payload
-        ]
-        _create_question_bank_item(quiz, question, created_choices)
-        created_questions.append(question)
-    _sync_quiz_questions_count(quiz)
-    return created_questions
-
-
 @transaction.atomic
 def create_quiz(user, validated_data):
-    question_types = validated_data.pop('question_types', [QuestionTypeChoices.MCQ])
-    generation_type = validated_data.get(
-        'generation_type',
-        GenerationTypeChoices.MANUAL,
-    )
-
+    validated_data.pop('question_types', None)
+    generation_type = validated_data.get('generation_type', GenerationTypeChoices.MANUAL)
+    if generation_type == GenerationTypeChoices.AI:
+        raise ValidationError({
+            'generation_type': 'Use POST /api/v1/ai/jobs/ with task_type=fahes_generate_quiz for AI quizzes.'
+        })
+    validated_data['questions_count'] = 0
     quiz = Quiz.objects.create(
         user=user,
-        status=QuizStatusChoices.PUBLISHED,
+        status=QuizStatusChoices.DRAFT,
         **validated_data,
     )
-
-    if generation_type == GenerationTypeChoices.AI:
-        ai_payload = generate_ai_quiz_mock(user, {**validated_data, 'question_types': question_types})
-        quiz.ai_request_id = ai_payload['ai_request_id']
-        quiz.save(update_fields=['ai_request_id', 'updated_at'])
-        _create_questions_from_payload(quiz, ai_payload['questions'])
-    else:
-        generate_mock_questions(quiz, question_types)
-
     _log_quiz_event(
         user=user,
         quiz=quiz,
         action=QuizLogActionChoices.QUIZ_CREATED,
-        metadata={
-            'generation_type': generation_type,
-            'question_types': _normalize_question_types(question_types),
-            'questions_count': quiz.questions_count,
-        },
+        metadata={'generation_type': generation_type, 'questions_count': 0},
     )
     return quiz
 
@@ -259,6 +139,19 @@ def start_quiz_attempt(user, quiz):
         raise ValidationError('You cannot start an attempt for another user quiz.')
     if quiz.status != QuizStatusChoices.PUBLISHED:
         raise ValidationError('Only published quizzes can be started.')
+    if not quiz.questions.exists():
+        raise ValidationError('A quiz must contain at least one question before an attempt can start.')
+
+    existing_attempt = (
+        QuizAttempt.objects.select_for_update()
+        .filter(user=user, quiz=quiz, status=AttemptStatusChoices.IN_PROGRESS)
+        .order_by('-started_at')
+        .first()
+    )
+    if existing_attempt and not _attempt_has_expired(existing_attempt):
+        return existing_attempt
+    if existing_attempt:
+        submit_quiz_attempt(existing_attempt, [])
 
     attempt = QuizAttempt.objects.create(
         user=user,
@@ -296,6 +189,8 @@ def _grade_answer(question, selected_choice=None, text_answer=''):
 def submit_answer(attempt, question, selected_choice=None, text_answer=None):
     if attempt.status != AttemptStatusChoices.IN_PROGRESS:
         raise ValidationError('Answers can only be submitted for in-progress attempts.')
+    if _attempt_has_expired(attempt):
+        raise ValidationError('The quiz time limit has expired. Submit the attempt to receive the result.')
     if question.quiz_id != attempt.quiz_id:
         raise ValidationError({'question': 'Question does not belong to this quiz attempt.'})
     if selected_choice and selected_choice.question_id != question.id:
@@ -367,12 +262,15 @@ def submit_quiz_attempt(attempt, answers_data):
     if attempt.status != AttemptStatusChoices.IN_PROGRESS:
         raise ValidationError('Only in-progress attempts can be submitted.')
 
+    expired = _attempt_has_expired(attempt)
+
     question_map = {
         question.id: question
         for question in attempt.quiz.questions.prefetch_related('choices').all()
     }
 
-    for answer_data in answers_data:
+    # Answers delivered after the server-side deadline are ignored. Previously saved answers remain valid.
+    for answer_data in ([] if expired else answers_data):
         question = question_map.get(answer_data['question'].id)
         if question is None:
             raise ValidationError({'question': 'Question does not belong to this quiz.'})
@@ -444,19 +342,6 @@ def abandon_attempt(attempt):
 
 
 def build_attempt_recommendations(attempt):
-    recommendations = ['راجع الأسئلة التي أخطأت بها.']
-
-    if attempt.percentage < Decimal('50.00'):
-        recommendations.append('أعد محاولة الاختبار بعد مراجعة الشرح الأساسي.')
-    elif attempt.percentage < Decimal('80.00'):
-        recommendations.append('ركّز على الأسئلة المتوسطة والصعبة قبل المحاولة القادمة.')
-    else:
-        recommendations.append('مستوى جيد، جرّب اختبارًا أصعب لتثبيت الفهم.')
-
-    return recommendations
-
-
-def build_attempt_recommendations(attempt):
     recommendations = ['Review the questions you answered incorrectly.']
 
     if attempt.percentage < Decimal('50.00'):
@@ -511,3 +396,21 @@ def build_attempt_result_payload(attempt):
         'percentage': attempt.percentage,
         'recommendations': build_attempt_recommendations(attempt),
     }
+
+
+@transaction.atomic
+def publish_quiz(quiz):
+    if quiz.generation_type != GenerationTypeChoices.MANUAL:
+        raise ValidationError("AI quizzes are published by the validated AI materialization flow.")
+    questions = quiz.questions.prefetch_related("choices").all()
+    if not questions.exists():
+        raise ValidationError("A quiz must contain at least one question before publishing.")
+    for question in questions:
+        if question.question_type in {QuestionTypeChoices.MCQ, QuestionTypeChoices.TRUE_FALSE}:
+            choices = list(question.choices.all())
+            if len(choices) < 2 or sum(1 for choice in choices if choice.is_correct) != 1:
+                raise ValidationError({"questions": f"Question {question.id} must contain exactly one correct choice."})
+    _sync_quiz_questions_count(quiz)
+    quiz.status = QuizStatusChoices.PUBLISHED
+    quiz.save(update_fields=["status", "updated_at"])
+    return quiz

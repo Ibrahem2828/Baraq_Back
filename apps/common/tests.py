@@ -28,6 +28,11 @@ class SystemAPITestCase(APITestCase):
             password='StrongPass123',
             full_name='Other System User',
         )
+        self.admin = User.objects.create_superuser(
+            email='system-admin@example.com',
+            password='StrongPass123',
+            full_name='System Admin',
+        )
 
     def authenticate(self, user=None):
         self.client.force_authenticate(user or self.user)
@@ -47,7 +52,8 @@ class SystemAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertEqual(response.data['data']['phase'], '3.6')
+        self.assertEqual(response.data['data']['api_version'], 'v1')
+        self.assertEqual(response.data['data']['version'], '4.0.0')
         self.assertTrue(response.data['data']['features']['quizzes'])
 
     def test_seed_academic_data_runs_successfully(self):
@@ -131,11 +137,13 @@ class SystemAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_schema_endpoint_returns_200(self):
+        self.authenticate(self.admin)
         response = self.client.get(reverse('api-schema'))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_docs_endpoint_returns_200(self):
+        self.authenticate(self.admin)
         response = self.client.get(reverse('api-docs'))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)

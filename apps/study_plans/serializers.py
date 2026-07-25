@@ -5,7 +5,6 @@ from apps.subjects.serializers import SubjectSerializer
 
 from .models import StudyPlan, StudyTask
 from .services import (
-    create_ai_plan,
     create_manual_plan,
     create_plan_task,
     update_plan,
@@ -125,7 +124,9 @@ class StudyPlanCreateSerializer(serializers.ModelSerializer):
         )
 
         if generation_type == StudyPlan.GenerationType.AI:
-            return create_ai_plan(user, validated_data)
+            raise serializers.ValidationError({
+                'generation_type': 'Use POST /api/v1/ai/jobs/ with task_type=khota_generate_plan for AI plans.'
+            })
         return create_manual_plan(user, validated_data)
 
 

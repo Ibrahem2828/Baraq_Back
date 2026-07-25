@@ -204,15 +204,14 @@ class SubscriptionsTestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
-    def test_unavailable_kholasa_keeps_old_response_and_no_usage(self):
+    def test_unavailable_kholasa_is_rejected_without_usage(self):
         source = self.create_source()
         self.authenticate(self.student)
         response = self.client.post(reverse('student-source-use-with-kholasa', args=[source.id]))
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertFalse(response.data['success'])
-        self.assertFalse(response.data['available'])
-        self.assertFalse(SubscriptionUsage.objects.filter(user=self.student).exists())
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        usage = SubscriptionUsage.objects.filter(user=self.student).first()
+        self.assertTrue(usage is None or usage.kholasa_requests == 0)
 
     def test_allowed_character_usage_increments_usage(self):
         source = self.create_source()

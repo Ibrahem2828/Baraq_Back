@@ -2,6 +2,7 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import PermissionsMixin
 from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models.functions import Lower
 from django.utils.translation import gettext_lazy as _
 
 from apps.common.models import BaseModel
@@ -45,6 +46,8 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
         ordering = ('-created_at',)
         verbose_name = 'User'
         verbose_name_plural = 'Users'
+        constraints = [models.UniqueConstraint(Lower('email'), name='unique_user_email_case_insensitive')]
+        indexes = [models.Index(fields=['role', 'is_active'], name='user_role_active_idx')]
 
     def __str__(self):
         return self.full_name or self.email
@@ -56,7 +59,7 @@ class User(BaseModel, AbstractBaseUser, PermissionsMixin):
         return self.full_name.split(' ')[0] if self.full_name else self.email
 
     def save(self, *args, **kwargs):
-        self.email = self.__class__.objects.normalize_email(self.email)
+        self.email = self.__class__.objects.normalize_email(self.email).strip().lower()
         if self.is_superuser:
             self.role = self.Roles.SUPER_ADMIN
         self.is_staff = (
