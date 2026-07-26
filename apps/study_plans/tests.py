@@ -240,5 +240,11 @@ class StudyPlanAPITestCase(APITestCase):
         self.assertEqual(response.data['results'][0]['title'], 'Cancelled Math Plan')
 
     def test_schema_endpoint_still_works(self):
+        admin = User.objects.create_superuser(
+            email='schema-admin@example.com',
+            password='StrongPass123',
+            full_name='Schema Admin',
+        )
+        self.authenticate(admin)
         response = self.client.get(reverse('api-schema'))
         self.assertEqual(response.status_code, status.HTTP_200_OK)

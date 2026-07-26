@@ -15,6 +15,7 @@ from apps.subscriptions.services import (
     can_upload_source,
     consume_collection_created,
     consume_source_uploaded,
+    get_user_features,
 )
 
 from .capabilities import (
@@ -182,7 +183,7 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='capabilities')
     def capabilities(self, request, pk=None):
         source = self.get_object()
-        return Response(get_source_character_capabilities(source))
+        return Response(get_source_character_capabilities(source, features=get_user_features(request.user)))
 
     @extend_schema(
         methods=['POST'],
@@ -365,7 +366,7 @@ class StudentSourceCollectionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='capabilities')
     def capabilities(self, request, pk=None):
         collection = self.get_object()
-        return Response(get_collection_character_capabilities(collection))
+        return Response(get_collection_character_capabilities(collection, features=get_user_features(request.user)))
 
     @extend_schema(
         methods=['POST'],

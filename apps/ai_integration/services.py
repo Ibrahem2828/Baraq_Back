@@ -105,6 +105,16 @@ def create_ai_job(*, user, task_type, source=None, collection=None, subject=None
 
 def build_service_payload(job):
     base = settings.PUBLIC_API_BASE_URL.rstrip("/")
+    source_manifest_url = None
+    collection_manifest_url = None
+    if job.source_id:
+        source_manifest_url = (
+            f"{base}/api/internal/v1/ai/sources/{job.source_id}/manifest/?user_id={job.user_id}"
+        )
+    if job.collection_id:
+        collection_manifest_url = (
+            f"{base}/api/internal/v1/ai/collections/{job.collection_id}/manifest/?user_id={job.user_id}"
+        )
     return {
         "client_job_id": str(job.public_id),
         "user_id": job.user_id,
@@ -116,8 +126,11 @@ def build_service_payload(job):
         "input": job.input_payload,
         "parameters": job.parameters,
         "callback_url": f"{base}/api/internal/v1/ai/webhooks/jobs/",
-        "source_manifest_url": f"{base}/api/internal/v1/ai/sources/{job.source_id}/manifest/" if job.source_id else None,
-        "collection_manifest_url": f"{base}/api/internal/v1/ai/collections/{job.collection_id}/manifest/" if job.collection_id else None,
+        # The AI service must preserve user_id on every internal source read.
+        # Django verifies it when supplied, preventing a cross-user mix-up in
+        # a worker from silently returning another student's material.
+        "source_manifest_url": source_manifest_url,
+        "collection_manifest_url": collection_manifest_url,
         "user_context_url": f"{base}/api/internal/v1/ai/users/{job.user_id}/context/",
     }
 

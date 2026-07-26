@@ -95,6 +95,56 @@ class AIIntegrationApiTests(APITestCase):
         self.assertEqual(allowed.status_code, status.HTTP_200_OK)
         self.assertEqual(allowed.data['id'], self.source.id)
 
+    def test_internal_manifest_validates_requested_owner(self):
+        allowed = self.client.get(
+            reverse('ai-source-manifest', args=[self.source.id]),
+            {'user_id': self.user.id},
+            HTTP_X_BARAQ_INTERNAL_KEY='i' * 64,
+        )
+        self.assertEqual(allowed.status_code, status.HTTP_200_OK)
+        self.assertIn(f'user_id={self.user.id}', allowed.data['download_url'])
+
+        denied = self.client.get(
+            reverse('ai-source-manifest', args=[self.source.id]),
+            {'user_id': self.other.id},
+            HTTP_X_BARAQ_INTERNAL_KEY='i' * 64,
+        )
+        self.assertEqual(denied.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_sada_rejects_collection_even_when_it_contains_audio(self):
+        from apps.sources.models import StudentSourceCollection
+
+        collection = StudentSourceCollection.objects.create(user=self.user, name='Audio folder')
+        audio = StudentSource.objects.create(
+            user=self.user,
+            title='Lecture recording',
+            source_type=StudentSource.SourceType.AUDIO,
+            file=SimpleUploadedFile('lecture.mp3', b'ID3audio', content_type='audio/mpeg'),
+            original_filename='lecture.mp3',
+            file_size=8,
+            mime_type='audio/mpeg',
+            extension='mp3',
+            collection=collection,
+            status=StudentSource.Status.UPLOADED,
+        )
+        self.authenticate()
+        response = self.client.post(
+            reverse('ai-job-list'),
+            {'task_type': AIJob.TaskType.SADA_TRANSCRIPTION, 'collection': collection.id},
+            format='json',
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        accepted = self.client.post(
+            reverse('ai-job-list'),
+            {'task_type': AIJob.TaskType.SADA_TRANSCRIPTION, 'source': audio.id},
+            format='json',
+        )
+        # The test account does not have the Sada subscription feature, so a
+        # 403 proves the audio source passed request validation and reached
+        # the entitlement layer (rather than being rejected as malformed).
+        self.assertEqual(accepted.status_code, status.HTTP_403_FORBIDDEN)
+
     def test_feedback_requires_completed_job(self):
         self.authenticate()
         create = self.client.post(

@@ -45,7 +45,7 @@ class SystemAPITestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertTrue(response.data['success'])
-        self.assertEqual(response.data['data']['status'], 'ok')
+        self.assertEqual(response.data['data']['status'], 'ready')
 
     def test_meta_endpoint_returns_200(self):
         response = self.client.get(reverse('project-meta'))

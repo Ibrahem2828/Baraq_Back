@@ -12,6 +12,7 @@ from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -27,6 +28,28 @@ from .security import HasInternalServiceKey, verify_webhook
 from .serializers import AIFeedbackSerializer, AIJobCreateSerializer, AIJobListSerializer, AIJobSerializer
 from .services import cancel_job, complete_job, create_ai_job, fail_job
 from .tasks import forward_ai_feedback
+
+
+def _assert_requested_owner(request, resource):
+    """Optionally bind an internal resource read to the job's user.
+
+    ``user_id`` is included in URLs generated for the AI service. It remains
+    optional for a short compatibility window with already queued jobs, but a
+    supplied value is always validated and an ownership mismatch is exposed as
+    a 404 rather than a cross-user data disclosure.
+    """
+
+    raw_user_id = request.query_params.get("user_id")
+    if raw_user_id in (None, ""):
+        return
+    try:
+        requested_user_id = int(raw_user_id)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({"user_id": "A positive integer is required."}) from exc
+    if requested_user_id <= 0:
+        raise ValidationError({"user_id": "A positive integer is required."})
+    if resource.user_id != requested_user_id:
+        raise Http404
 
 
 @extend_schema(tags=['AI Jobs'])
@@ -112,13 +135,16 @@ class AIJobViewSet(viewsets.GenericViewSet):
             return Response({'detail': 'Feedback is accepted only for completed AI jobs.'}, status=status.HTTP_409_CONFLICT)
         serializer = AIFeedbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        feedback, _ = AIFeedback.objects.update_or_create(
+        feedback, created = AIFeedback.objects.update_or_create(
             job=job,
             user=request.user,
             defaults={**serializer.validated_data, 'consent_version': serializer.validated_data.get('consent_version') or settings.AI_DATASET_CONSENT_VERSION},
         )
         transaction.on_commit(lambda: forward_ai_feedback.delay(feedback.pk))
-        return Response(AIFeedbackSerializer(feedback).data, status=status.HTTP_201_CREATED)
+        return Response(
+            AIFeedbackSerializer(feedback).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class AICapabilitiesView(APIView):
@@ -204,6 +230,8 @@ class InternalSourceManifestView(APIView):
 
     def get(self, request, pk):
         source = get_object_or_404(StudentSource.objects.select_related('subject', 'collection'), pk=pk)
+        _assert_requested_owner(request, source)
+        query = f'?user_id={source.user_id}'
         return Response({
             'id': source.id,
             'user_id': source.user_id,
@@ -217,7 +245,7 @@ class InternalSourceManifestView(APIView):
             'subject_id': source.subject_id,
             'collection_id': source.collection_id,
             'extracted_text': source.extracted_text if source.status == source.Status.READY else None,
-            'download_url': request.build_absolute_uri(f'/api/internal/v1/ai/sources/{source.id}/download/'),
+            'download_url': request.build_absolute_uri(f'/api/internal/v1/ai/sources/{source.id}/download/{query}'),
         })
 
 
@@ -227,6 +255,7 @@ class InternalSourceDownloadView(APIView):
 
     def get(self, request, pk):
         source = get_object_or_404(StudentSource, pk=pk)
+        _assert_requested_owner(request, source)
         if not source.file:
             raise Http404
         response = FileResponse(source.file.open('rb'), content_type=source.mime_type or 'application/octet-stream')
@@ -242,6 +271,7 @@ class InternalCollectionManifestView(APIView):
 
     def get(self, request, pk):
         collection = get_object_or_404(StudentSourceCollection.objects.prefetch_related('sources'), pk=pk)
+        _assert_requested_owner(request, collection)
         return Response({
             'id': collection.id,
             'user_id': collection.user_id,
@@ -253,7 +283,9 @@ class InternalCollectionManifestView(APIView):
                     'title': source.title,
                     'source_type': source.source_type,
                     'status': source.status,
-                    'manifest_url': request.build_absolute_uri(f'/api/internal/v1/ai/sources/{source.id}/manifest/'),
+                    'manifest_url': request.build_absolute_uri(
+                        f'/api/internal/v1/ai/sources/{source.id}/manifest/?user_id={collection.user_id}'
+                    ),
                 }
                 for source in collection.sources.filter(status__in=[StudentSource.Status.UPLOADED, StudentSource.Status.READY])
             ],

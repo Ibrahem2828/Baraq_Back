@@ -28,7 +28,7 @@ class StudentProfileTests(APITestCase):
             },
             format='json',
         )
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertTrue(response.data['is_setup_completed'])
         detail = self.client.get(reverse('student-profile'))
         self.assertEqual(detail.status_code, status.HTTP_200_OK)

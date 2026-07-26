@@ -78,7 +78,9 @@ def _create_character_job(user, character, *, source=None, collection=None, acti
     task_type = TASK_BY_CHARACTER.get(character)
     if task_type is None:
         raise ValidationError({'character': 'الشخصية غير مدعومة.'})
-    if character == StudentSourceInteraction.Character.SADA and source and source.source_type != StudentSource.SourceType.AUDIO:
+    if character == StudentSourceInteraction.Character.SADA and (
+        collection or source is None or source.source_type != StudentSource.SourceType.AUDIO
+    ):
         raise ValidationError({'character': 'صدى يعمل فقط مع مصدر صوتي.'})
     parameters = {'requested_action': action} if action else {}
     job, created = create_ai_job(

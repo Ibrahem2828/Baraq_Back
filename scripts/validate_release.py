@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -26,6 +27,31 @@ def iter_files(pattern='*'):
 
 def fail(errors, message):
     errors.append(message)
+
+
+def tracked_paths():
+    """Return Git-tracked paths, or None when the source is not a Git checkout.
+
+    Local ``.env`` files and transient SQLite databases are intentionally
+    ignored by Git and Docker. They must not make a source-tree release check
+    fail, while the same files remain forbidden when they are actually staged
+    for release. A non-Git export retains the conservative old behaviour.
+    """
+
+    try:
+        result = subprocess.run(
+            ['git', 'ls-files', '-z'],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {
+        Path(value.decode('utf-8'))
+        for value in result.stdout.split(b'\0')
+        if value
+    }
 
 
 def validate_python(errors):
@@ -77,10 +103,13 @@ def validate_python(errors):
 
 
 def validate_hygiene(errors):
+    tracked = tracked_paths()
     for path in iter_files('*'):
-        if path.name in FORBIDDEN_NAMES:
+        relative_path = path.relative_to(ROOT)
+        is_release_file = tracked is None or relative_path in tracked
+        if is_release_file and path.name in FORBIDDEN_NAMES:
             fail(errors, f'Forbidden release file: {path.relative_to(ROOT)}')
-        if path.suffix in {'.pyc', '.sqlite3', '.db'}:
+        if is_release_file and path.suffix in {'.pyc', '.sqlite3', '.db'}:
             fail(errors, f'Forbidden generated/database file: {path.relative_to(ROOT)}')
         if path.is_file() and path.stat().st_size <= 3_000_000 and path.suffix.lower() in {
             '.py', '.md', '.txt', '.json', '.yaml', '.yml', '.toml', '.ini', '.example', ''

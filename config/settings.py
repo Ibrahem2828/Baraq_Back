@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+import sys
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
@@ -162,6 +163,13 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+
+# Password hashes in the test database are deliberately cheap. This branch is
+# reached only through ``manage.py test`` and has no effect on development or
+# production authentication policies.
+if "test" in sys.argv:
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 AUTH_USER_MODEL = "users.User"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -218,6 +226,11 @@ REST_FRAMEWORK = {
         "ai_requests": env("THROTTLE_AI", default="100/day"),
     },
 }
+
+# Only applications installed by this project are part of the default test
+# suite. See apps.common.test_runner for why legacy, uninstalled prototypes
+# are intentionally excluded from an unlabeled ``manage.py test`` run.
+TEST_RUNNER = "apps.common.test_runner.EnabledAppsDiscoverRunner"
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=env("ACCESS_TOKEN_LIFETIME_MINUTES")),

@@ -58,6 +58,10 @@ class AIServiceClient:
                 headers=headers,
                 timeout=self.timeout,
                 verify=settings.AI_SERVICE_VERIFY_SSL,
+                # A redirect can forward the internal API key and HMAC
+                # signature to a different origin. The service base URL is a
+                # configured trust boundary, so redirects are never valid.
+                allow_redirects=False,
             )
         except requests.Timeout as exc:
             raise AIServiceError("AI service timeout.", code="ai_service_timeout", retryable=True) from exc
@@ -67,7 +71,7 @@ class AIServiceClient:
             data = response.json()
         except ValueError:
             data = {"message": response.text[:500]}
-        if response.status_code >= 400:
+        if response.status_code >= 300:
             retryable = response.status_code in {408, 425, 429, 500, 502, 503, 504}
             raise AIServiceError(
                 str(data.get("message") or data.get("detail") or "AI service request failed."),

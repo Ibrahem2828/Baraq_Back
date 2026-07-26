@@ -31,11 +31,16 @@ class AIJobCreateSerializer(serializers.Serializer):
         if task_type in {
             AIJob.TaskType.FAHES_GENERATE_QUIZ,
             AIJob.TaskType.KHOLASA_SUMMARY,
-            AIJob.TaskType.SADA_TRANSCRIPTION,
         } and not (source or collection):
             raise serializers.ValidationError('This task requires a source or collection.')
-        if task_type == AIJob.TaskType.SADA_TRANSCRIPTION and source and source.source_type != source.SourceType.AUDIO:
-            raise serializers.ValidationError({'source': 'Sada requires an audio source.'})
+        if task_type == AIJob.TaskType.SADA_TRANSCRIPTION:
+            # The upstream transcription API accepts one audio asset per job.
+            # A collection can contain non-audio files or several recordings,
+            # neither of which has an unambiguous, safe transcription result.
+            if collection or not source:
+                raise serializers.ValidationError({'source': 'Sada requires exactly one audio source; collections are not supported.'})
+            if source.source_type != source.SourceType.AUDIO:
+                raise serializers.ValidationError({'source': 'Sada requires an audio source.'})
         if source and source.status in {source.Status.PROCESSING, source.Status.FAILED}:
             raise serializers.ValidationError({'source': 'The source is not ready for an AI request.'})
         encoded_size = len(json.dumps({'input': attrs.get('input', {}), 'parameters': attrs.get('parameters', {})}, ensure_ascii=False, default=str).encode('utf-8'))
