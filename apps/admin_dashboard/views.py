@@ -6,6 +6,7 @@ from django.db import connection
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, mixins, status, viewsets
 from rest_framework.decorators import action
@@ -603,7 +604,7 @@ def build_system_health():
     }
 
 
-@extend_schema(tags=['Admin Dashboard'])
+@extend_schema(tags=['Admin Dashboard'], responses=OpenApiTypes.OBJECT)
 class AdminApiRootView(APIView):
     permission_classes = [IsAdminDashboardUser]
 

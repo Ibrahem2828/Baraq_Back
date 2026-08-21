@@ -1,5 +1,15 @@
 # Release Changelog - Production Candidate 4.0
 
+## 2026-08-19 — Follow-up correction
+
+The "Removed: Embedded AI provider implementations and duplicated AI
+gateway/platform code" entry below was aspirational when written: `apps/ai_gateway`
+and `apps/ai_platform` were never wired into `INSTALLED_APPS`/`config/urls.py`
+(see `docs/BACKEND_PRODUCTION_READINESS_AUDIT_AR.md`), but the directories
+themselves (~4,000 lines) were still physically present in the tree. They have
+now actually been deleted, along with `AI_PLATFORM_IMPLEMENTATION.md` and
+`CHANGELOG_AI_IMPLEMENTATION.md`, which documented only that dead code.
+
 ## Removed
 
 - Embedded AI provider implementations and duplicated AI gateway/platform code.

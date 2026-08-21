@@ -4,12 +4,33 @@ from rest_framework import serializers
 
 from apps.sources.models import StudentSource, StudentSourceCollection
 from apps.subjects.models import Subject
+from apps.projects.models import Project
 
 from .models import AIFeedback, AIJob
 
 
+class CanonicalTaskTypeField(serializers.ChoiceField):
+    """Accept legacy client values only long enough to persist a V2 value."""
+
+    legacy_aliases = {
+        "kholasa_summary": AIJob.TaskType.KHOLASA_GENERATE_SUMMARY,
+        "sada_transcription": AIJob.TaskType.SADA_TRANSCRIBE_AUDIO,
+        "kholasa_summarize": AIJob.TaskType.KHOLASA_GENERATE_SUMMARY,
+        "sada_transcribe": AIJob.TaskType.SADA_TRANSCRIBE_AUDIO,
+        "rasheed_recommend": AIJob.TaskType.RASHEED_RECOMMENDATIONS,
+    }
+
+    def to_internal_value(self, data):
+        return super().to_internal_value(self.legacy_aliases.get(data, data))
+
+
 class AIJobCreateSerializer(serializers.Serializer):
-    task_type = serializers.ChoiceField(choices=AIJob.TaskType.choices)
+    task_type = CanonicalTaskTypeField(choices=AIJob.TaskType.choices)
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.filter(is_deleted=False, status=Project.Status.ACTIVE),
+        required=False,
+        allow_null=True,
+    )
     source = serializers.PrimaryKeyRelatedField(queryset=StudentSource.objects.all(), required=False, allow_null=True)
     collection = serializers.PrimaryKeyRelatedField(queryset=StudentSourceCollection.objects.all(), required=False, allow_null=True)
     subject = serializers.PrimaryKeyRelatedField(queryset=Subject.objects.filter(is_active=True), required=False, allow_null=True)
@@ -21,19 +42,27 @@ class AIJobCreateSerializer(serializers.Serializer):
         user = self.context['request'].user
         source = attrs.get('source')
         collection = attrs.get('collection')
+        project = attrs.get('project')
+        if project and project.owner_id != user.id:
+            raise serializers.ValidationError({'project': 'You do not own this project.'})
         if source and source.user_id != user.id:
             raise serializers.ValidationError({'source': 'You do not own this source.'})
         if collection and collection.user_id != user.id:
             raise serializers.ValidationError({'collection': 'You do not own this collection.'})
         if source and collection:
             raise serializers.ValidationError('Choose either source or collection.')
+        inherited_project = getattr(source, 'project', None) or getattr(collection, 'project', None)
+        if inherited_project:
+            if project and project.id != inherited_project.id:
+                raise serializers.ValidationError({'project': 'Project must match the selected source or collection.'})
+            attrs['project'] = inherited_project
         task_type = attrs['task_type']
         if task_type in {
             AIJob.TaskType.FAHES_GENERATE_QUIZ,
-            AIJob.TaskType.KHOLASA_SUMMARY,
+            AIJob.TaskType.KHOLASA_GENERATE_SUMMARY,
         } and not (source or collection):
             raise serializers.ValidationError('This task requires a source or collection.')
-        if task_type == AIJob.TaskType.SADA_TRANSCRIPTION:
+        if task_type == AIJob.TaskType.SADA_TRANSCRIBE_AUDIO:
             # The upstream transcription API accepts one audio asset per job.
             # A collection can contain non-audio files or several recordings,
             # neither of which has an unambiguous, safe transcription result.
@@ -54,6 +83,7 @@ class AIJobListSerializer(serializers.ModelSerializer):
         model = AIJob
         fields = (
             'public_id', 'character', 'task_type', 'status', 'source', 'collection', 'subject',
+            'project', 'contract_version',
             'result_type', 'result_id', 'error_code', 'submitted_at', 'completed_at',
             'created_at', 'updated_at',
         )
@@ -65,8 +95,10 @@ class AIJobSerializer(serializers.ModelSerializer):
         model = AIJob
         fields = (
             'public_id', 'character', 'task_type', 'status', 'source', 'collection', 'subject',
+            'project', 'contract_version', 'request_id',
             'external_job_id', 'input_payload', 'parameters', 'result_payload', 'result_type',
             'result_id', 'error_code', 'error_message', 'credits_reserved', 'credits_committed',
+            'quality_metrics', 'security_flags', 'output_schema_version',
             'submitted_at', 'completed_at', 'created_at', 'updated_at',
         )
         read_only_fields = fields

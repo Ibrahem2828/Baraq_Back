@@ -1,13 +1,12 @@
 """Test discovery limited to applications enabled by the Django project.
 
-The repository deliberately retains two uninstalled, legacy AI prototypes for
-reference while the production integration lives in ``apps.ai_integration``.
 Django's default ``test`` command discovers every Python package below the
-repository root, including those prototypes. That makes a deployment check
-execute code which is neither installed nor routed by this project.
+repository root. Restricting unlabeled runs to ``INSTALLED_APPS`` keeps a
+deployment check from ever picking up a package that isn't installed or
+routed by this project (e.g. an experimental app under development).
 
-Explicit test labels remain untouched, so a developer can still run a legacy
-suite deliberately while it is being migrated or removed.
+Explicit test labels remain untouched, so a developer can still run any
+suite deliberately by name.
 """
 
 from __future__ import annotations

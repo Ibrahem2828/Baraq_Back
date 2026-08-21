@@ -10,11 +10,12 @@ from rest_framework.test import APITestCase
 
 from apps.admin_dashboard.models import AuditLog
 from apps.admin_dashboard.services import assign_roles_to_user, seed_default_rbac
+from apps.ai_integration.models import AIJob
 from apps.sources.models import StudentSource, StudentSourceCollection, StudentSourceInteraction
 from apps.subjects.models import EducationStage, Subject
 
 from .exceptions import SubscriptionFeatureNotAllowed, SubscriptionLimitExceeded
-from .models import SubscriptionPlan, SubscriptionUsage, UserSubscription
+from .models import SubscriptionPlan, SubscriptionUsage, UsageLedgerEntry, UserSubscription
 from .services import (
     can_create_collection,
     can_upload_source,
@@ -24,6 +25,8 @@ from .services import (
     get_or_create_user_subscription,
     get_remaining_limits,
     get_user_subscription,
+    refund_character_request,
+    reserve_character_request,
 )
 
 User = get_user_model()
@@ -100,10 +103,30 @@ class SubscriptionsTestCase(APITestCase):
         self.assertTrue(SubscriptionPlan.objects.filter(code='school').exists())
 
     def test_get_user_subscription_returns_free_fallback(self):
-        UserSubscription.objects.filter(user=self.student).delete()
+        UserSubscription.all_objects.filter(user=self.student).hard_delete()
         subscription = get_user_subscription(self.student)
 
         self.assertEqual(subscription.plan.code, 'free')
+
+    def test_delete_soft_deletes_subscription_row(self):
+        subscription = UserSubscription.objects.get(user=self.student)
+        subscription_id = subscription.id
+
+        UserSubscription.objects.filter(user=self.student).delete()
+
+        self.assertFalse(UserSubscription.objects.filter(id=subscription_id).exists())
+        self.assertTrue(UserSubscription.all_objects.get(id=subscription_id).is_deleted)
+
+    def test_get_or_create_revives_a_soft_deleted_subscription_instead_of_erroring(self):
+        original = UserSubscription.objects.get(user=self.student)
+        original_id = original.id
+        UserSubscription.objects.filter(user=self.student).delete()
+
+        revived = get_or_create_user_subscription(self.student)
+
+        self.assertEqual(revived.id, original_id)
+        self.assertFalse(revived.is_deleted)
+        self.assertEqual(revived.plan.code, 'free')
 
     def test_new_user_gets_free_subscription(self):
         user = User.objects.create_user(
@@ -301,3 +324,40 @@ class SubscriptionsTestCase(APITestCase):
         self.assertEqual(health.status_code, status.HTTP_200_OK)
         self.assertEqual(login.status_code, status.HTTP_200_OK)
         self.assertEqual(collection.status_code, status.HTTP_201_CREATED)
+
+    def test_usage_ledger_reserve_and_refund_are_idempotent(self):
+        job = AIJob.objects.create(
+            user=self.student,
+            character=AIJob.Character.FAHES,
+            task_type=AIJob.TaskType.FAHES_GENERATE_QUIZ,
+            status=AIJob.Status.QUEUED,
+            idempotency_key='usage-ledger-idempotency',
+        )
+
+        reserve_character_request(self.student, job.character, job=job)
+        reserve_character_request(self.student, job.character, job=job)
+        usage = SubscriptionUsage.objects.get(user=self.student)
+        self.assertEqual(usage.ai_requests_used, 1)
+        self.assertEqual(usage.fahes_requests, 1)
+        self.assertEqual(
+            UsageLedgerEntry.objects.filter(
+                user=self.student,
+                operation=UsageLedgerEntry.Operation.RESERVE,
+                idempotency_key=job.idempotency_key,
+            ).count(),
+            1,
+        )
+
+        refund_character_request(self.student, job.character, job=job)
+        refund_character_request(self.student, job.character, job=job)
+        usage.refresh_from_db()
+        self.assertEqual(usage.ai_requests_used, 0)
+        self.assertEqual(usage.fahes_requests, 0)
+        self.assertEqual(
+            UsageLedgerEntry.objects.filter(
+                user=self.student,
+                operation=UsageLedgerEntry.Operation.REFUND,
+                idempotency_key=job.idempotency_key,
+            ).count(),
+            1,
+        )

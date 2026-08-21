@@ -1,6 +1,7 @@
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from apps.subjects.models import Subject
+from apps.projects.models import Project
 from apps.subjects.serializers import SubjectSerializer
 
 from .models import StudyPlan, StudyTask
@@ -51,6 +52,7 @@ class StudyPlanListSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'title',
+            'project',
             'subject',
             'start_date',
             'end_date',
@@ -91,6 +93,11 @@ class StudyPlanDetailSerializer(StudyPlanListSerializer):
 
 
 class StudyPlanCreateSerializer(serializers.ModelSerializer):
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.filter(is_deleted=False, status=Project.Status.ACTIVE),
+        required=False,
+        allow_null=True,
+    )
     subject = serializers.PrimaryKeyRelatedField(
         queryset=Subject.objects.filter(is_active=True, education_stage__is_active=True)
     )
@@ -98,6 +105,7 @@ class StudyPlanCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StudyPlan
         fields = (
+            'project',
             'title',
             'description',
             'subject',
@@ -114,6 +122,12 @@ class StudyPlanCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'end_date': 'End date must be greater than or equal to start date.'}
             )
+        project = attrs.get('project')
+        user = self.context['request'].user
+        if project and project.owner_id != user.id:
+            raise serializers.ValidationError({'project': 'Project not found or not owned by the current user.'})
+        if project and project.subject_id and attrs['subject'].id != project.subject_id:
+            raise serializers.ValidationError({'subject': 'Subject must match the selected project.'})
         return attrs
 
     def create(self, validated_data):

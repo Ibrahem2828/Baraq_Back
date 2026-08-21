@@ -9,8 +9,9 @@ from django.db.models import Avg, Count, Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
-from rest_framework import filters, permissions, status, viewsets
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import filters, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
@@ -26,22 +27,16 @@ from .client import AIServiceClient, AIServiceError
 from .models import AIFeedback, AIJob, AIWebhookEvent
 from .security import HasInternalServiceKey, verify_webhook
 from .serializers import AIFeedbackSerializer, AIJobCreateSerializer, AIJobListSerializer, AIJobSerializer
-from .services import cancel_job, complete_job, create_ai_job, fail_job
+from .services import cancel_job, complete_job, create_ai_job, fail_job, update_job_progress
 from .tasks import forward_ai_feedback
 
 
 def _assert_requested_owner(request, resource):
-    """Optionally bind an internal resource read to the job's user.
-
-    ``user_id`` is included in URLs generated for the AI service. It remains
-    optional for a short compatibility window with already queued jobs, but a
-    supplied value is always validated and an ownership mismatch is exposed as
-    a 404 rather than a cross-user data disclosure.
-    """
+    """Bind every internal source read to the authenticated job user."""
 
     raw_user_id = request.query_params.get("user_id")
     if raw_user_id in (None, ""):
-        return
+        raise ValidationError({"user_id": "A positive integer is required."})
     try:
         requested_user_id = int(raw_user_id)
     except (TypeError, ValueError) as exc:
@@ -50,6 +45,22 @@ def _assert_requested_owner(request, resource):
         raise ValidationError({"user_id": "A positive integer is required."})
     if resource.user_id != requested_user_id:
         raise Http404
+
+
+def _content_sha256(source):
+    checksum = str((source.metadata or {}).get("sha256") or "").lower()
+    if len(checksum) == 64 and all(character in "0123456789abcdef" for character in checksum):
+        return checksum
+    if not source.file:
+        raise Http404
+    digest = hashlib.sha256()
+    with source.file.open("rb") as source_file:
+        for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    checksum = digest.hexdigest()
+    source.metadata = {**(source.metadata or {}), "sha256": checksum}
+    source.save(update_fields=["metadata", "updated_at"])
+    return checksum
 
 
 @extend_schema(tags=['AI Jobs'])
@@ -65,7 +76,7 @@ class AIJobViewSet(viewsets.GenericViewSet):
         return super().get_throttles()
 
     def get_queryset(self):
-        return AIJob.objects.filter(user=self.request.user).select_related('source', 'collection', 'subject')
+        return AIJob.objects.filter(user=self.request.user).select_related('project', 'source', 'collection', 'subject')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -91,6 +102,7 @@ class AIJobViewSet(viewsets.GenericViewSet):
         job, created = create_ai_job(
             user=request.user,
             task_type=data['task_type'],
+            project=data.get('project'),
             source=data.get('source'),
             collection=data.get('collection'),
             subject=data.get('subject'),
@@ -117,15 +129,18 @@ class AIJobViewSet(viewsets.GenericViewSet):
         except AIServiceError as exc:
             return Response({'success': False, 'message': str(exc), 'code': exc.code}, status=exc.status_code or 503)
         remote_status = str(data.get('status') or '').lower()
-        if remote_status in dict(AIJob.Status.choices):
-            job.status = remote_status
-            job.last_synced_at = timezone.now()
-            job.service_metadata = {**job.service_metadata, 'last_refresh': data}
-            job.save(update_fields=['status', 'last_synced_at', 'service_metadata', 'updated_at'])
         if remote_status == AIJob.Status.COMPLETED and data.get('result'):
-            job = complete_job(job, data['result'], {'refresh_response': data})
+            job = complete_job(job, data['result'], {
+                'refresh_response': data,
+                'quality_metrics': data.get('quality_metrics') or {},
+                'security_flags': data.get('security_flags') or {},
+            })
         elif remote_status == AIJob.Status.FAILED:
             job = fail_job(job, RuntimeError(data.get('error_message') or 'AI job failed.'))
+        elif remote_status == AIJob.Status.CANCELED:
+            job = cancel_job(job)
+        elif remote_status in {AIJob.Status.SUBMITTED, AIJob.Status.PROCESSING, AIJob.Status.VALIDATING}:
+            job = update_job_progress(job, remote_status, metadata={'last_refresh': data})
         return Response(AIJobSerializer(job).data)
 
     @action(detail=True, methods=['post'], url_path='feedback')
@@ -147,6 +162,19 @@ class AIJobViewSet(viewsets.GenericViewSet):
         )
 
 
+@extend_schema(
+    tags=['AI Jobs'],
+    responses=inline_serializer(
+        name='AICapabilities',
+        fields={
+            'service_enabled': serializers.BooleanField(),
+            'characters': serializers.ListField(child=serializers.CharField()),
+            'task_types': serializers.ListField(child=serializers.CharField()),
+            'phase_one': serializers.ListField(child=serializers.CharField()),
+            'phase_two': serializers.ListField(child=serializers.CharField()),
+        },
+    ),
+)
 class AICapabilitiesView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -160,6 +188,7 @@ class AICapabilitiesView(APIView):
         })
 
 
+@extend_schema(tags=['AI Jobs'], responses={200: OpenApiTypes.OBJECT, 503: OpenApiTypes.OBJECT})
 class AIServiceHealthView(APIView):
     permission_classes = [permissions.IsAdminUser]
 
@@ -171,6 +200,12 @@ class AIServiceHealthView(APIView):
             return Response({'status': 'error', 'message': str(exc), 'code': exc.code}, status=503)
 
 
+@extend_schema(
+    tags=['AI Internal'],
+    request=OpenApiTypes.OBJECT,
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
+    description='Signed webhook callback from the standalone AI service reporting an AIJob result or status update.',
+)
 class AIWebhookView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
@@ -205,15 +240,17 @@ class AIWebhookView(APIView):
         try:
             remote_status = str(payload.get('status') or '').lower()
             if remote_status == AIJob.Status.COMPLETED:
-                complete_job(job, payload.get('result') or {}, {'webhook': payload.get('metadata') or {}})
+                complete_job(job, payload.get('result') or {}, {
+                    'webhook': payload.get('metadata') or {},
+                    'quality_metrics': payload.get('quality_metrics') or {},
+                    'security_flags': payload.get('security_flags') or {},
+                })
             elif remote_status == AIJob.Status.FAILED:
                 fail_job(job, RuntimeError(payload.get('error_message') or 'AI service job failed.'))
             elif remote_status == AIJob.Status.CANCELED:
                 cancel_job(job)
-            elif remote_status in dict(AIJob.Status.choices):
-                job.status = remote_status
-                job.last_synced_at = timezone.now()
-                job.save(update_fields=['status', 'last_synced_at', 'updated_at'])
+            elif remote_status in {AIJob.Status.SUBMITTED, AIJob.Status.PROCESSING, AIJob.Status.VALIDATING}:
+                update_job_progress(job, remote_status, metadata={'webhook': payload.get('metadata') or {}})
             event.processed = True
             event.processed_at = timezone.now()
             event.save(update_fields=['processed', 'processed_at'])
@@ -224,6 +261,11 @@ class AIWebhookView(APIView):
         return Response({'accepted': True})
 
 
+@extend_schema(
+    tags=['AI Internal'],
+    responses=OpenApiTypes.OBJECT,
+    description='Source metadata and a signed download URL, for the AI service to fetch.',
+)
 class InternalSourceManifestView(APIView):
     permission_classes = [HasInternalServiceKey]
     authentication_classes = []
@@ -231,24 +273,27 @@ class InternalSourceManifestView(APIView):
     def get(self, request, pk):
         source = get_object_or_404(StudentSource.objects.select_related('subject', 'collection'), pk=pk)
         _assert_requested_owner(request, source)
-        query = f'?user_id={source.user_id}'
         return Response({
-            'id': source.id,
-            'user_id': source.user_id,
+            'source_id': str(source.id),
+            'owner_user_id': str(source.user_id),
             'title': source.title,
-            'source_type': source.source_type,
-            'status': source.status,
             'mime_type': source.mime_type,
-            'extension': source.extension,
-            'file_size': source.file_size,
-            'checksum': source.metadata.get('sha256'),
-            'subject_id': source.subject_id,
-            'collection_id': source.collection_id,
-            'extracted_text': source.extracted_text if source.status == source.Status.READY else None,
-            'download_url': request.build_absolute_uri(f'/api/internal/v1/ai/sources/{source.id}/download/{query}'),
+            'size_bytes': source.file_size,
+            'content_sha256': _content_sha256(source),
+            'subject_id': str(source.subject_id) if source.subject_id else None,
+            'metadata': {
+                'source_type': source.source_type,
+                'status': source.status,
+                'extension': source.extension,
+            },
         })
 
 
+@extend_schema(
+    tags=['AI Internal'],
+    responses={200: OpenApiTypes.BINARY},
+    description='Streams the raw source file to the AI service for processing.',
+)
 class InternalSourceDownloadView(APIView):
     permission_classes = [HasInternalServiceKey]
     authentication_classes = []
@@ -265,6 +310,11 @@ class InternalSourceDownloadView(APIView):
         return response
 
 
+@extend_schema(
+    tags=['AI Internal'],
+    responses=OpenApiTypes.OBJECT,
+    description='Collection metadata and its member sources, each with a manifest URL, for the AI service.',
+)
 class InternalCollectionManifestView(APIView):
     permission_classes = [HasInternalServiceKey]
     authentication_classes = []
@@ -273,25 +323,27 @@ class InternalCollectionManifestView(APIView):
         collection = get_object_or_404(StudentSourceCollection.objects.prefetch_related('sources'), pk=pk)
         _assert_requested_owner(request, collection)
         return Response({
-            'id': collection.id,
-            'user_id': collection.user_id,
-            'name': collection.name,
-            'subject_id': collection.subject_id,
-            'sources': [
-                {
-                    'id': source.id,
-                    'title': source.title,
-                    'source_type': source.source_type,
-                    'status': source.status,
-                    'manifest_url': request.build_absolute_uri(
-                        f'/api/internal/v1/ai/sources/{source.id}/manifest/?user_id={collection.user_id}'
-                    ),
-                }
-                for source in collection.sources.filter(status__in=[StudentSource.Status.UPLOADED, StudentSource.Status.READY])
+            'collection_id': str(collection.id),
+            'owner_user_id': str(collection.user_id),
+            'title': collection.name,
+            'source_ids': [
+                str(source.id)
+                for source in collection.sources.filter(
+                    status__in=[StudentSource.Status.UPLOADED, StudentSource.Status.READY]
+                ).order_by('id')
             ],
+            'metadata': {
+                'subject_id': str(collection.subject_id) if collection.subject_id else None,
+                'status': collection.status,
+            },
         })
 
 
+@extend_schema(
+    tags=['AI Internal'],
+    responses=OpenApiTypes.OBJECT,
+    description='Student profile, subjects, and performance summary, for the AI service to ground its responses.',
+)
 class InternalUserContextView(APIView):
     permission_classes = [HasInternalServiceKey]
     authentication_classes = []
@@ -311,16 +363,18 @@ class InternalUserContextView(APIView):
             skipped=Count('id', filter=Q(status=StudyTask.Status.SKIPPED)),
         )
         return Response({
-            'user_id': pk,
-            'profile': {
-                'education_stage': getattr(getattr(profile, 'education_stage', None), 'name', None),
-                'grade_level': getattr(profile, 'grade_level', ''),
-                'specialization': getattr(profile, 'specialization', ''),
-                'study_goal': getattr(profile, 'study_goal', ''),
-                'daily_study_hours': getattr(profile, 'daily_study_hours', None),
-            },
-            'subjects': [{'id': item.subject_id, 'name': item.subject.name} for item in subjects],
-            'performance': {
+            'user_id': str(pk),
+            'education_stage': getattr(getattr(profile, 'education_stage', None), 'name', None),
+            'grade_level': getattr(profile, 'grade_level', '') or None,
+            'specialization': getattr(profile, 'specialization', '') or None,
+            'daily_study_minutes': (
+                int(profile.daily_study_hours * 60)
+                if profile and profile.daily_study_hours is not None
+                else None
+            ),
+            'selected_subjects': [{'id': str(item.subject_id), 'name': item.subject.name} for item in subjects],
+            'exam_dates': {},
+            'authoritative_metrics': {
                 'quiz_attempts': quiz_metrics['attempts'] or 0,
                 'average_quiz_percentage': float(quiz_metrics['average_percentage'] or 0),
                 'study_tasks_total': task_metrics['total'] or 0,
@@ -330,6 +384,7 @@ class InternalUserContextView(APIView):
         })
 
 
+@extend_schema(tags=['AI Jobs'], responses=OpenApiTypes.OBJECT, description='Route index for the AI integration API.')
 class AIApiRootView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

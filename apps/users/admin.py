@@ -18,6 +18,7 @@ class UserAdmin(BaseUserAdmin):
         'phone_number',
         'is_active',
         'is_staff',
+        'is_deleted',
         'created_at',
     )
     list_filter = (
@@ -25,10 +26,23 @@ class UserAdmin(BaseUserAdmin):
         'is_active',
         'is_staff',
         'is_superuser',
+        'is_deleted',
         'created_at',
     )
     search_fields = ('email', 'full_name', 'phone_number')
-    readonly_fields = ('created_at', 'updated_at', 'last_login')
+    readonly_fields = ('created_at', 'updated_at', 'last_login', 'is_deleted', 'deleted_at')
+    actions = ('restore_selected_users',)
+
+    def get_queryset(self, request):
+        # ``User.objects`` hides soft-deleted accounts; the admin should
+        # still surface them (for support/audit/restore), not pretend
+        # deletion made them disappear entirely.
+        return User.all_objects.all()
+
+    @admin.action(description='Restore selected users (undo soft delete)')
+    def restore_selected_users(self, request, queryset):
+        updated = queryset.filter(is_deleted=True).update(is_deleted=False, deleted_at=None)
+        self.message_user(request, f'Restored {updated} user(s).')
     filter_horizontal = ('groups', 'user_permissions')
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
@@ -46,6 +60,7 @@ class UserAdmin(BaseUserAdmin):
             },
         ),
         ('Important Dates', {'fields': ('last_login', 'created_at', 'updated_at')}),
+        ('Deletion', {'fields': ('is_deleted', 'deleted_at')}),
     )
     add_fieldsets = (
         (

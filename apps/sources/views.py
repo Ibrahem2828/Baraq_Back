@@ -63,6 +63,7 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
             'subject',
             'subject__education_stage',
             'collection',
+            'project',
         ).filter(user=self.request.user)
 
         source_type = self.request.query_params.get('source_type')
@@ -80,6 +81,10 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
         collection = self.request.query_params.get('collection')
         if collection:
             queryset = queryset.filter(collection_id=collection)
+
+        project = self.request.query_params.get('project')
+        if project:
+            queryset = queryset.filter(project__public_id=project)
 
         return queryset
 
@@ -100,6 +105,7 @@ class StudentSourceViewSet(viewsets.ModelViewSet):
             OpenApiParameter(name='status', type=str),
             OpenApiParameter(name='subject', type=int),
             OpenApiParameter(name='collection', type=int),
+            OpenApiParameter(name='project', type=str),
         ],
         responses=StudentSourceListSerializer(many=True),
     )

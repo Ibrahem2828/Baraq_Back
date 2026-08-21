@@ -40,6 +40,13 @@ class StudentSource(BaseModel):
         on_delete=models.CASCADE,
         related_name='student_sources',
     )
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.SET_NULL,
+        related_name='sources',
+        null=True,
+        blank=True,
+    )
     subject = models.ForeignKey(
         'subjects.Subject',
         on_delete=models.SET_NULL,
@@ -79,6 +86,9 @@ class StudentSource(BaseModel):
         ordering = ('-created_at',)
         verbose_name = 'Student Source'
         verbose_name_plural = 'Student Sources'
+        indexes = [
+            models.Index(fields=['project', '-created_at'], name='source_project_timeline_idx'),
+        ]
 
     def __str__(self):
         return f'{self.title} - {self.user.email}'
@@ -93,6 +103,13 @@ class StudentSourceCollection(BaseModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='student_source_collections',
+    )
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.SET_NULL,
+        related_name='source_collections',
+        null=True,
+        blank=True,
     )
     subject = models.ForeignKey(
         'subjects.Subject',
@@ -118,6 +135,7 @@ class StudentSourceCollection(BaseModel):
         indexes = [
             models.Index(fields=['user', 'status']),
             models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['project', 'status'], name='source_collection_project_idx'),
         ]
 
     def __str__(self):

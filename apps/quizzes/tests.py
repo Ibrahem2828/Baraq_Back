@@ -233,6 +233,18 @@ class QuizProductionFlowTests(APITestCase):
         second = self.client.post(reverse('quiz-start', args=[quiz.id]), {}, format='json')
         self.assertEqual(first.data['attempt_id'], second.data['attempt_id'])
 
+    def test_deleting_an_attempt_soft_deletes_it(self):
+        quiz, _ = self.create_published_quiz(questions=1)
+        attempt = QuizAttempt.objects.create(user=self.user, quiz=quiz)
+        attempt_id = attempt.id
+
+        attempt.delete()
+
+        self.assertFalse(QuizAttempt.objects.filter(id=attempt_id).exists())
+        deleted_attempt = QuizAttempt.all_objects.get(id=attempt_id)
+        self.assertTrue(deleted_attempt.is_deleted)
+        self.assertIsNotNone(deleted_attempt.deleted_at)
+
     def test_expired_attempt_ignores_late_answers(self):
         quiz, generated = self.create_published_quiz(questions=1)
         question, choices = generated[0]

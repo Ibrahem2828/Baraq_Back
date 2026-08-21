@@ -5,6 +5,7 @@ urlpatterns = [
     path('', include('apps.users.urls')),
     path('', include('apps.students.urls')),
     path('', include('apps.subjects.urls')),
+    path('', include('apps.projects.urls')),
     path('', include('apps.study_plans.urls')),
     path('', include('apps.quizzes.urls')),
     path('', include('apps.sources.urls')),

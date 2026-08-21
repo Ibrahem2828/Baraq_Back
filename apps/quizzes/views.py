@@ -57,6 +57,10 @@ class QuizViewSet(viewsets.ModelViewSet):
         if subject:
             queryset = queryset.filter(subject_id=subject)
 
+        project = params.get('project')
+        if project:
+            queryset = queryset.filter(project__public_id=project)
+
         difficulty_level = params.get('difficulty_level')
         if difficulty_level:
             queryset = queryset.filter(difficulty_level=difficulty_level)
@@ -96,6 +100,7 @@ class QuizViewSet(viewsets.ModelViewSet):
         description='List the current user quizzes with filters, search, and ordering.',
         parameters=[
             OpenApiParameter(name='subject', type=int),
+            OpenApiParameter(name='project', type=str),
             OpenApiParameter(name='difficulty_level', type=str),
             OpenApiParameter(name='quiz_type', type=str),
             OpenApiParameter(name='generation_type', type=str),

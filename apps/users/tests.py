@@ -10,6 +10,40 @@ User = get_user_model()
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'])
+class UserSoftDeleteTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email='soft-delete@example.com',
+            password='StrongPass123',
+            full_name='Soft Delete User',
+        )
+
+    def test_delete_marks_user_deleted_instead_of_removing_row(self):
+        user_id = self.user.id
+
+        self.user.delete()
+
+        self.assertFalse(User.objects.filter(id=user_id).exists())
+        self.assertTrue(User.all_objects.filter(id=user_id).exists())
+        deleted_user = User.all_objects.get(id=user_id)
+        self.assertTrue(deleted_user.is_deleted)
+        self.assertIsNotNone(deleted_user.deleted_at)
+
+    def test_soft_deleted_user_cannot_be_fetched_by_natural_key(self):
+        self.user.delete()
+
+        with self.assertRaises(User.DoesNotExist):
+            User.objects.get_by_natural_key('soft-delete@example.com')
+
+    def test_hard_delete_permanently_removes_row(self):
+        user_id = self.user.id
+
+        self.user.hard_delete()
+
+        self.assertFalse(User.all_objects.filter(id=user_id).exists())
+
+
+@override_settings(ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'])
 class UserAuthTests(APITestCase):
     def test_registration_normalizes_email_and_creates_student_profile(self):
         response = self.client.post(

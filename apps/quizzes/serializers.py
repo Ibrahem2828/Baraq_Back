@@ -2,6 +2,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.subjects.models import Subject
+from apps.projects.models import Project
 
 from .models import (
     AttemptStatusChoices,
@@ -105,6 +106,7 @@ class QuizListSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'title',
+            'project',
             'subject',
             'topic',
             'difficulty_level',
@@ -150,6 +152,11 @@ class QuizDetailSerializer(QuizListSerializer):
 
 
 class QuizCreateSerializer(serializers.ModelSerializer):
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.filter(is_deleted=False, status=Project.Status.ACTIVE),
+        required=False,
+        allow_null=True,
+    )
     subject = serializers.PrimaryKeyRelatedField(
         queryset=Subject.objects.filter(is_active=True, education_stage__is_active=True)
     )
@@ -162,6 +169,7 @@ class QuizCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
         fields = (
+            'project',
             'subject',
             'title',
             'description',
@@ -179,6 +187,15 @@ class QuizCreateSerializer(serializers.ModelSerializer):
         if value not in {GenerationTypeChoices.MANUAL, GenerationTypeChoices.AI}:
             raise serializers.ValidationError('Invalid generation type.')
         return value
+
+    def validate(self, attrs):
+        project = attrs.get('project')
+        user = self.context['request'].user
+        if project and project.owner_id != user.id:
+            raise serializers.ValidationError({'project': 'Project not found or not owned by the current user.'})
+        if project and project.subject_id and attrs['subject'].id != project.subject_id:
+            raise serializers.ValidationError({'subject': 'Subject must match the selected project.'})
+        return attrs
 
     def create(self, validated_data):
         user = self.context['request'].user

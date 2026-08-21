@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ast
+import math
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,39 @@ SECRET_PATTERNS = [
     re.compile(r'OPENAI_[A-Z_]*API_KEY\s*=\s*(?!replace|$)[^\s]+', re.I),
     re.compile(r'SECRET_KEY\s*=\s*["\']django-insecure-[^"\']+', re.I),
 ]
+
+SECRET_KEY_LINE = re.compile(r'^\s*SECRET_KEY\s*=\s*(.+?)\s*$', re.M)
+MIN_SECRET_KEY_LENGTH = 50
+MIN_SECRET_KEY_ENTROPY_BITS = 4.0
+MIN_SECRET_KEY_UNIQUE_RATIO = 0.5
+PLACEHOLDER_MARKERS = ('replace-with', 'change-me', 'changeme', 'your-secret-key', 'insecure', 'example')
+
+
+def _shannon_entropy(value):
+    if not value:
+        return 0.0
+    counts = Counter(value)
+    length = len(value)
+    return -sum((count / length) * math.log2(count / length) for count in counts.values())
+
+
+def weak_secret_key_reason(value):
+    """Return a human-readable reason the value is unfit as a Django SECRET_KEY, or None."""
+    value = value.strip().strip('"\'')
+    if not value:
+        return None
+    lowered = value.lower()
+    if any(marker in lowered for marker in PLACEHOLDER_MARKERS):
+        return None  # placeholders are handled separately (allowed only in .env.example)
+    if len(value) < MIN_SECRET_KEY_LENGTH:
+        return f'shorter than {MIN_SECRET_KEY_LENGTH} characters ({len(value)})'
+    unique_ratio = len(set(value)) / len(value)
+    if unique_ratio < MIN_SECRET_KEY_UNIQUE_RATIO:
+        return f'too little character variety (unique ratio {unique_ratio:.2f} < {MIN_SECRET_KEY_UNIQUE_RATIO})'
+    entropy = _shannon_entropy(value)
+    if entropy < MIN_SECRET_KEY_ENTROPY_BITS:
+        return f'entropy too low ({entropy:.2f} bits/char < {MIN_SECRET_KEY_ENTROPY_BITS})'
+    return None
 
 
 def iter_files(pattern='*'):
@@ -124,6 +159,14 @@ def validate_hygiene(errors):
                 if pattern.search(text):
                     fail(errors, f'Potential secret found: {path.relative_to(ROOT)}')
                     break
+            for match in SECRET_KEY_LINE.finditer(text):
+                candidate = match.group(1)
+                if any(token in candidate for token in ('<', '>', '(', ')', 'env(', 'os.environ', 'getenv')):
+                    continue  # code reference or doc placeholder template, not a literal value
+                reason = weak_secret_key_reason(candidate)
+                if reason:
+                    line_number = text.count('\n', 0, match.start()) + 1
+                    fail(errors, f'Weak SECRET_KEY in {path.relative_to(ROOT)}:{line_number}: {reason}')
 
 
 def validate_required(errors):

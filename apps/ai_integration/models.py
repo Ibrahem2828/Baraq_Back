@@ -21,8 +21,8 @@ class AIJob(BaseModel):
         FAHES_GENERATE_QUIZ = "fahes_generate_quiz", "Generate quiz"
         KHOTA_GENERATE_PLAN = "khota_generate_plan", "Generate study plan"
         RASHEED_RECOMMENDATIONS = "rasheed_recommendations", "Performance recommendations"
-        KHOLASA_SUMMARY = "kholasa_summary", "Summarize source"
-        SADA_TRANSCRIPTION = "sada_transcription", "Transcribe audio"
+        KHOLASA_GENERATE_SUMMARY = "kholasa_generate_summary", "Summarize source"
+        SADA_TRANSCRIBE_AUDIO = "sada_transcribe_audio", "Transcribe audio"
 
     class Status(models.TextChoices):
         CREATED = "created", "Created"
@@ -30,6 +30,8 @@ class AIJob(BaseModel):
         SUBMITTED = "submitted", "Submitted to AI service"
         PROCESSING = "processing", "Processing"
         VALIDATING = "validating", "Validating"
+        OUTPUT_READY = "output_ready", "Output ready"
+        MATERIALIZING = "materializing", "Materializing"
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
         CANCELED = "canceled", "Canceled"
@@ -38,6 +40,13 @@ class AIJob(BaseModel):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
+        related_name="ai_jobs",
+    )
+    project = models.ForeignKey(
+        "projects.Project",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="ai_jobs",
     )
     character = models.CharField(max_length=20, choices=Character.choices, db_index=True)
@@ -66,6 +75,8 @@ class AIJob(BaseModel):
     )
     external_job_id = models.CharField(max_length=128, blank=True, db_index=True)
     idempotency_key = models.CharField(max_length=128, db_index=True)
+    contract_version = models.CharField(max_length=20, default="2.0", db_index=True)
+    request_id = models.CharField(max_length=128, blank=True, db_index=True)
     input_payload = models.JSONField(default=dict, blank=True)
     parameters = models.JSONField(default=dict, blank=True)
     result_payload = models.JSONField(default=dict, blank=True)
@@ -79,6 +90,9 @@ class AIJob(BaseModel):
     completed_at = models.DateTimeField(null=True, blank=True)
     last_synced_at = models.DateTimeField(null=True, blank=True)
     service_metadata = models.JSONField(default=dict, blank=True)
+    quality_metrics = models.JSONField(default=dict, blank=True)
+    security_flags = models.JSONField(default=dict, blank=True)
+    output_schema_version = models.CharField(max_length=20, blank=True)
 
     class Meta:
         ordering = ("-created_at",)
@@ -91,10 +105,15 @@ class AIJob(BaseModel):
                 condition=Q(source__isnull=True) | Q(collection__isnull=True),
                 name="ai_job_single_source_target",
             ),
+            models.CheckConstraint(
+                condition=(~Q(status="completed")) | (Q(result_type__gt="") & Q(result_id__gt="")),
+                name="ai_job_completed_has_materialized_result",
+            ),
         ]
         indexes = [
             models.Index(fields=("user", "status", "-created_at"), name="ai_job_user_status_idx"),
             models.Index(fields=("task_type", "status", "-created_at"), name="ai_job_task_status_idx"),
+            models.Index(fields=("project", "status", "-created_at"), name="ai_job_project_status_idx"),
         ]
 
     def __str__(self):

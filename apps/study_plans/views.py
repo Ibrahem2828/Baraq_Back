@@ -85,6 +85,10 @@ class StudyPlanViewSet(viewsets.ModelViewSet):
         if subject:
             queryset = queryset.filter(subject_id=subject)
 
+        project = params.get('project')
+        if project:
+            queryset = queryset.filter(project__public_id=project)
+
         difficulty_level = params.get('difficulty_level')
         if difficulty_level:
             queryset = queryset.filter(difficulty_level=difficulty_level)
@@ -125,6 +129,7 @@ class StudyPlanViewSet(viewsets.ModelViewSet):
         parameters=[
             OpenApiParameter(name='status', type=str),
             OpenApiParameter(name='subject', type=int),
+            OpenApiParameter(name='project', type=str),
             OpenApiParameter(name='start_date', type=str),
             OpenApiParameter(name='end_date', type=str),
             OpenApiParameter(name='difficulty_level', type=str),

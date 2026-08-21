@@ -9,7 +9,7 @@ from rest_framework.exceptions import ValidationError
 from apps.ai_integration.models import AIJob
 from apps.ai_integration.services import create_ai_job
 
-from .models import StudentSource, StudentSourceCollection, StudentSourceInteraction
+from .models import StudentSource, StudentSourceInteraction
 
 TXT_READ_LIMIT_BYTES = 2 * 1024 * 1024
 
@@ -69,8 +69,8 @@ TASK_BY_CHARACTER = {
     StudentSourceInteraction.Character.FAHES: AIJob.TaskType.FAHES_GENERATE_QUIZ,
     StudentSourceInteraction.Character.KHOTA: AIJob.TaskType.KHOTA_GENERATE_PLAN,
     StudentSourceInteraction.Character.RASHEED: AIJob.TaskType.RASHEED_RECOMMENDATIONS,
-    StudentSourceInteraction.Character.KHOLASA: AIJob.TaskType.KHOLASA_SUMMARY,
-    StudentSourceInteraction.Character.SADA: AIJob.TaskType.SADA_TRANSCRIPTION,
+    StudentSourceInteraction.Character.KHOLASA: AIJob.TaskType.KHOLASA_GENERATE_SUMMARY,
+    StudentSourceInteraction.Character.SADA: AIJob.TaskType.SADA_TRANSCRIBE_AUDIO,
 }
 
 
@@ -89,7 +89,6 @@ def _create_character_job(user, character, *, source=None, collection=None, acti
         source=source,
         collection=collection,
         subject=getattr(source, 'subject', None) or getattr(collection, 'subject', None),
-        input_payload={},
         parameters=parameters,
     )
     interaction = StudentSourceInteraction.objects.filter(metadata__ai_job_id=str(job.public_id)).first()

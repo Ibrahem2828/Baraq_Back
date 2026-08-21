@@ -1,8 +1,22 @@
 from django.contrib.auth.base_user import BaseUserManager
+from django.core.exceptions import FieldDoesNotExist
+
+from apps.common.models import SoftDeleteQuerySet
 
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
+
+    def get_queryset(self):
+        # ``use_in_migrations`` means this exact class is also used against
+        # historical model states from migrations older than the one that
+        # added ``is_deleted`` (e.g. 0002_email_case_insensitive predates it).
+        # Filtering unconditionally would raise FieldError on those replays.
+        try:
+            self.model._meta.get_field('is_deleted')
+        except FieldDoesNotExist:
+            return super().get_queryset()
+        return SoftDeleteQuerySet(self.model, using=self._db).filter(is_deleted=False)
 
     def create_user(self, email, password=None, **extra_fields):
         if not email:

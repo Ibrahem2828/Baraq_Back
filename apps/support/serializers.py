@@ -1,4 +1,5 @@
 from django.db import transaction
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import SupportMessage, SupportTicket
@@ -30,6 +31,7 @@ class SupportTicketDetailSerializer(serializers.ModelSerializer):
         fields = ("id", "subject", "category", "priority", "status", "metadata", "messages", "resolved_at", "created_at", "updated_at")
         read_only_fields = ("id", "status", "messages", "resolved_at", "created_at", "updated_at")
 
+    @extend_schema_field(SupportMessageSerializer(many=True))
     def get_messages(self, obj):
         return SupportMessageSerializer(obj.messages.filter(is_internal=False), many=True).data
 

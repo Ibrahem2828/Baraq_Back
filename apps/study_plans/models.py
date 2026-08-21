@@ -30,6 +30,13 @@ class StudyPlan(BaseModel):
         on_delete=models.CASCADE,
         related_name='study_plans',
     )
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.SET_NULL,
+        related_name='study_plans',
+        null=True,
+        blank=True,
+    )
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     subject = models.ForeignKey(
@@ -70,6 +77,10 @@ class StudyPlan(BaseModel):
                 condition=Q(end_date__gte=F('start_date')),
                 name='study_plan_start_before_end',
             ),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'status'], name='study_plan_user_status_idx'),
+            models.Index(fields=['project', 'status', '-created_at'], name='study_plan_project_status_idx'),
         ]
 
     def __str__(self):
@@ -124,6 +135,9 @@ class StudyTask(BaseModel):
                 fields=['plan', 'task_date', 'order'],
                 name='unique_plan_task_order_per_day',
             )
+        ]
+        indexes = [
+            models.Index(fields=['plan', 'status'], name='study_task_plan_status_idx'),
         ]
 
     def __str__(self):

@@ -14,7 +14,13 @@ from .constants import (
     FREE_PLAN_CODE,
 )
 from .exceptions import SubscriptionFeatureNotAllowed, SubscriptionLimitExceeded
-from .models import SubscriptionEvent, SubscriptionPlan, SubscriptionUsage, UserSubscription
+from .models import (
+    SubscriptionEvent,
+    SubscriptionPlan,
+    SubscriptionUsage,
+    UsageLedgerEntry,
+    UserSubscription,
+)
 
 
 def ensure_default_plans():
@@ -56,6 +62,22 @@ def get_or_create_user_subscription(user):
     subscription = UserSubscription.objects.select_related('plan').filter(user=user).first()
     if subscription:
         return subscription
+
+    # UserSubscription.user is a OneToOneField, so a soft-deleted row still
+    # occupies that unique slot. Revive it instead of racing an INSERT into
+    # get_or_create() and hitting an IntegrityError on the unique constraint.
+    deleted_subscription = UserSubscription.all_objects.filter(user=user, is_deleted=True).first()
+    if deleted_subscription:
+        deleted_subscription.is_deleted = False
+        deleted_subscription.deleted_at = None
+        deleted_subscription.plan = get_free_plan()
+        deleted_subscription.status = UserSubscription.Status.ACTIVE
+        deleted_subscription.provider = UserSubscription.Provider.LOCAL
+        deleted_subscription.save(
+            update_fields=['is_deleted', 'deleted_at', 'plan', 'status', 'provider', 'updated_at']
+        )
+        return deleted_subscription
+
     return UserSubscription.objects.get_or_create(
         user=user,
         defaults={
@@ -328,8 +350,16 @@ def subscription_summary_for_user(user):
         'remaining': get_remaining_limits(user),
     }
 
+def _usage_operation_key(job=None, idempotency_key=None):
+    if idempotency_key:
+        return str(idempotency_key)[:128]
+    if job is not None:
+        return str(getattr(job, 'idempotency_key', '') or getattr(job, 'public_id', ''))[:128]
+    raise ValueError('An idempotency key is required for a usage ledger operation.')
+
+
 @transaction.atomic
-def reserve_character_request(user, character):
+def reserve_character_request(user, character, *, job=None, idempotency_key=None, policy_version='usage-v1'):
     """Atomically validate and reserve one AI request.
 
     The older can_use/consume pair remains for compatibility. New asynchronous AI
@@ -344,8 +374,15 @@ def reserve_character_request(user, character):
             character=character,
         )
 
+    operation_key = _usage_operation_key(job, idempotency_key)
     usage = get_or_create_current_usage(user)
     usage = SubscriptionUsage.objects.select_for_update().get(pk=usage.pk)
+    if UsageLedgerEntry.objects.filter(
+        user=user,
+        operation=UsageLedgerEntry.Operation.RESERVE,
+        idempotency_key=operation_key,
+    ).exists():
+        return usage
     limits = get_user_limits(user)
 
     general_limit = limit_value(limits, 'max_ai_requests_per_month')
@@ -375,14 +412,61 @@ def reserve_character_request(user, character):
     if usage_field:
         update_fields.append(usage_field)
     usage.save(update_fields=update_fields)
+    UsageLedgerEntry.objects.create(
+        user=user,
+        subscription=usage.subscription,
+        job=job,
+        period_start=usage.period_start,
+        period_end=usage.period_end,
+        task_type=getattr(job, 'task_type', '') or character,
+        operation=UsageLedgerEntry.Operation.RESERVE,
+        units=1,
+        idempotency_key=operation_key,
+        policy_version=policy_version,
+        actor_type='user',
+        metadata={'character': character},
+    )
     return usage
 
 
 @transaction.atomic
-def refund_character_request(user, character):
-    """Refund one reserved request after a canceled/failed job."""
+def commit_character_request(job, *, policy_version='usage-v1'):
+    """Record the single, final commit for a successfully materialized AI job."""
+
+    operation_key = _usage_operation_key(job)
+    usage = get_or_create_current_usage(job.user)
+    usage = SubscriptionUsage.objects.select_for_update().get(pk=usage.pk)
+    _, created = UsageLedgerEntry.objects.get_or_create(
+        user=job.user,
+        operation=UsageLedgerEntry.Operation.COMMIT,
+        idempotency_key=operation_key,
+        defaults={
+            'subscription': usage.subscription,
+            'job': job,
+            'period_start': usage.period_start,
+            'period_end': usage.period_end,
+            'task_type': job.task_type,
+            'units': 1,
+            'policy_version': policy_version,
+            'actor_type': 'system',
+            'metadata': {'character': job.character},
+        },
+    )
+    return created
+
+
+@transaction.atomic
+def refund_character_request(user, character, *, job=None, idempotency_key=None, policy_version='usage-v1'):
+    """Refund exactly one reservation after a canceled or failed job."""
+    operation_key = _usage_operation_key(job, idempotency_key)
     usage = get_or_create_current_usage(user)
     usage = SubscriptionUsage.objects.select_for_update().get(pk=usage.pk)
+    if UsageLedgerEntry.objects.filter(
+        user=user,
+        operation=UsageLedgerEntry.Operation.REFUND,
+        idempotency_key=operation_key,
+    ).exists():
+        return usage
     usage_field = CHARACTER_USAGE_FIELDS.get(character)
     usage.ai_requests_used = max(usage.ai_requests_used - 1, 0)
     update_fields = ['ai_requests_used', 'updated_at']
@@ -390,4 +474,53 @@ def refund_character_request(user, character):
         setattr(usage, usage_field, max(getattr(usage, usage_field) - 1, 0))
         update_fields.append(usage_field)
     usage.save(update_fields=update_fields)
+    UsageLedgerEntry.objects.create(
+        user=user,
+        subscription=usage.subscription,
+        job=job,
+        period_start=usage.period_start,
+        period_end=usage.period_end,
+        task_type=getattr(job, 'task_type', '') or character,
+        operation=UsageLedgerEntry.Operation.REFUND,
+        units=1,
+        idempotency_key=operation_key,
+        policy_version=policy_version,
+        actor_type='system',
+        metadata={'character': character},
+    )
+    return usage
+
+
+@transaction.atomic
+def rebuild_usage_projection(user, *, period_start=None, period_end=None):
+    """Rebuild the mutable usage projection from immutable ledger entries."""
+
+    usage = get_or_create_current_usage(user)
+    if period_start is not None or period_end is not None:
+        usage = SubscriptionUsage.objects.select_for_update().get(
+            user=user,
+            period_start=period_start or usage.period_start,
+            period_end=period_end or usage.period_end,
+        )
+    else:
+        usage = SubscriptionUsage.objects.select_for_update().get(pk=usage.pk)
+
+    entries = UsageLedgerEntry.objects.filter(
+        user=user,
+        period_start=usage.period_start,
+        period_end=usage.period_end,
+    )
+    reserved = sum(entry.units for entry in entries.filter(operation=UsageLedgerEntry.Operation.RESERVE))
+    refunded = sum(entry.units for entry in entries.filter(operation=UsageLedgerEntry.Operation.REFUND))
+    usage.ai_requests_used = max(reserved - refunded, 0)
+    for character, field in CHARACTER_USAGE_FIELDS.items():
+        character_entries = entries.filter(metadata__character=character)
+        character_reserved = sum(
+            entry.units for entry in character_entries.filter(operation=UsageLedgerEntry.Operation.RESERVE)
+        )
+        character_refunded = sum(
+            entry.units for entry in character_entries.filter(operation=UsageLedgerEntry.Operation.REFUND)
+        )
+        setattr(usage, field, max(character_reserved - character_refunded, 0))
+    usage.save(update_fields=['ai_requests_used', *CHARACTER_USAGE_FIELDS.values(), 'updated_at'])
     return usage

@@ -69,6 +69,7 @@ def materialize_fahes(job, data):
         time_limit = max(1, min(int(time_limit), 600))
     quiz = Quiz.objects.create(
         user=job.user,
+        project=job.project,
         subject=subject,
         title=str(data.get("quiz_title") or f"اختبار {subject.name}")[:255],
         description=str(data.get("description") or "تم إنشاء الاختبار بواسطة فاحص."),
@@ -134,6 +135,7 @@ def materialize_khota(job, data):
     daily_limit = max(15, min(int(job.parameters.get("daily_minutes") or 60), 720))
     plan = StudyPlan.objects.create(
         user=job.user,
+        project=job.project,
         subject=subject,
         title=str(data.get("plan_title") or f"خطة {subject.name}")[:255],
         description=str(data.get("summary") or ""),
@@ -250,7 +252,7 @@ def materialize_job(job, data):
         job.TaskType.FAHES_GENERATE_QUIZ: materialize_fahes,
         job.TaskType.KHOTA_GENERATE_PLAN: materialize_khota,
         job.TaskType.RASHEED_RECOMMENDATIONS: materialize_rasheed,
-        job.TaskType.KHOLASA_SUMMARY: materialize_kholasa,
-        job.TaskType.SADA_TRANSCRIPTION: materialize_sada,
+        job.TaskType.KHOLASA_GENERATE_SUMMARY: materialize_kholasa,
+        job.TaskType.SADA_TRANSCRIBE_AUDIO: materialize_sada,
     }
     return mapping[job.task_type](job, data)

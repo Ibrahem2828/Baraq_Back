@@ -60,11 +60,21 @@ class HealthCheckView(ReadinessView):
     """Backward-compatible readiness endpoint."""
 
 
+META_RESPONSE = inline_serializer(
+    name="ProjectMetaResponse",
+    fields={
+        "success": serializers.BooleanField(),
+        "message": serializers.CharField(),
+        "data": serializers.JSONField(),
+    },
+)
+
+
 class ProjectMetaView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
 
-    @extend_schema(tags=["System"])
+    @extend_schema(tags=["System"], responses={200: META_RESPONSE})
     def get(self, request):
         return success_response(
             data={

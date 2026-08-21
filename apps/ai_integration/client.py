@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
 import requests
 from django.conf import settings
 
-from .security import sign_payload
+from .security import make_service_signature
 
 logger = logging.getLogger(__name__)
 
@@ -39,17 +38,16 @@ class AIServiceClient:
         if not settings.AI_SERVICE_ENABLED:
             raise AIServiceError("AI service is disabled.", code="ai_service_disabled", status_code=503)
         method = method.upper()
-        body = b"" if method == "GET" else json.dumps(payload or {}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        timestamp = str(int(time.time()))
-        headers = {
-            "Content-Type": "application/json",
-            "X-Baraq-Timestamp": timestamp,
-            "X-Baraq-Signature": sign_payload(body, timestamp),
-            "X-Baraq-Internal-Key": settings.AI_SERVICE_INTERNAL_API_KEY,
-        }
+        target = "/" + path.lstrip("/")
+        body = b"" if payload is None else json.dumps(
+            payload, separators=(",", ":"), ensure_ascii=False, sort_keys=True
+        ).encode("utf-8")
+        headers = make_service_signature(method=method, target=target, body=body)
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
-        url = urljoin(self.base_url, path.lstrip("/"))
+        url = urljoin(self.base_url, target.lstrip("/"))
         try:
             response = self.session.request(
                 method,
@@ -81,8 +79,8 @@ class AIServiceClient:
             )
         return AIServiceResponse(data=data.get("data", data), status_code=response.status_code)
 
-    def create_job(self, payload, idempotency_key):
-        return self._request("POST", settings.AI_SERVICE_JOBS_PATH, payload=payload, idempotency_key=idempotency_key)
+    def create_job(self, payload):
+        return self._request("POST", settings.AI_SERVICE_JOBS_PATH, payload=payload)
 
     def get_job(self, external_job_id):
         return self._request("GET", f"{settings.AI_SERVICE_JOBS_PATH.rstrip('/')}/{external_job_id}")

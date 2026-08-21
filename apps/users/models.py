@@ -5,7 +5,7 @@ from django.db import models
 from django.db.models.functions import Lower
 from django.utils.translation import gettext_lazy as _
 
-from apps.common.models import BaseModel
+from apps.common.models import SoftDeleteModel
 
 from .managers import UserManager
 
@@ -15,7 +15,7 @@ phone_number_validator = RegexValidator(
 )
 
 
-class User(BaseModel, AbstractBaseUser, PermissionsMixin):
+class User(SoftDeleteModel, AbstractBaseUser, PermissionsMixin):
     class Roles(models.TextChoices):
         STUDENT = 'student', _('Student')
         ADMIN = 'admin', _('Admin')

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from apps.common.models import BaseModel
 
@@ -20,12 +21,20 @@ class Notification(BaseModel):
     body = models.TextField()
     data = models.JSONField(default=dict, blank=True)
     action_url = models.CharField(max_length=500, blank=True)
+    idempotency_key = models.CharField(max_length=160, blank=True, db_index=True)
     read_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ("-created_at",)
         indexes = [
             models.Index(fields=("user", "read_at", "-created_at"), name="notif_user_read_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "idempotency_key"),
+                condition=~Q(idempotency_key=""),
+                name="unique_notification_idempotency_key",
+            ),
         ]
 
     @property

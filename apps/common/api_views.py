@@ -1,9 +1,19 @@
 from django.conf import settings
 from django.views.generic import TemplateView
-from rest_framework import permissions
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import permissions, serializers
 from rest_framework.views import APIView
 
 from .responses import success_response
+
+API_ROOT_RESPONSE = inline_serializer(
+    name="APIRootResponse",
+    fields={
+        "success": serializers.BooleanField(),
+        "message": serializers.CharField(),
+        "data": serializers.JSONField(),
+    },
+)
 
 
 class LandingPageView(TemplateView):
@@ -26,6 +36,7 @@ class LandingPageView(TemplateView):
         return context
 
 
+@extend_schema(tags=["System"], responses={200: API_ROOT_RESPONSE})
 class APIRootView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []

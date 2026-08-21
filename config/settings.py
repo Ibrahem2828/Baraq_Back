@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 import sys
 
 import environ
 from django.core.exceptions import ImproperlyConfigured
+
+from apps.common.env_config import resolve_list_setting
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -27,6 +30,7 @@ env = environ.Env(
     AI_SERVICE_VERIFY_SSL=(bool, True),
     AI_SERVICE_TIMEOUT_SECONDS=(int, 30),
     AI_DATASET_CONSENT_VERSION=(str, "2026-07-01"),
+    PAYMENTS_ENABLED=(bool, False),
     SECURE_SSL_REDIRECT=(bool, True),
     SECURE_HSTS_SECONDS=(int, 31536000),
     SECURE_HSTS_INCLUDE_SUBDOMAINS=(bool, True),
@@ -41,7 +45,12 @@ DEBUG = env("DEBUG")
 SECRET_KEY = env("SECRET_KEY", default="")
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
-CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[]) or CORS_ALLOWED_ORIGINS
+CSRF_TRUSTED_ORIGINS = resolve_list_setting(
+    env,
+    "CSRF_TRUSTED_ORIGINS",
+    fallback_keys=("DJANGO_CSRF_TRUSTED_ORIGINS",),
+    default=CORS_ALLOWED_ORIGINS,
+)
 PUBLIC_API_BASE_URL = env("PUBLIC_API_BASE_URL", default="http://localhost:8000").rstrip("/")
 
 if not DEBUG:
@@ -75,6 +84,7 @@ APP_FEATURES = {
     "sada": True,
     "notifications": True,
     "support": True,
+    "payments": env("PAYMENTS_ENABLED"),
 }
 
 INSTALLED_APPS = [
@@ -93,6 +103,7 @@ INSTALLED_APPS = [
     "apps.users",
     "apps.students",
     "apps.subjects",
+    "apps.projects.apps.ProjectsConfig",
     "apps.study_plans",
     "apps.quizzes",
     "apps.sources",
@@ -260,6 +271,17 @@ SPECTACULAR_SETTINGS = {
         "QuizStatusEnum": "apps.quizzes.models.QuizStatusChoices",
         "QuestionTypeEnum": "apps.quizzes.models.QuestionTypeChoices",
         "AttemptStatusEnum": "apps.quizzes.models.AttemptStatusChoices",
+        "AIJobCharacterEnum": "apps.ai_integration.models.AIJob.Character",
+        "AIJobStatusEnum": "apps.ai_integration.models.AIJob.Status",
+        "StudentSourceStatusEnum": "apps.sources.models.StudentSource.Status",
+        "StudentSourceCollectionStatusEnum": "apps.sources.models.StudentSourceCollection.Status",
+        "StudentSourceInteractionCharacterEnum": "apps.sources.models.StudentSourceInteraction.Character",
+        "StudentSourceInteractionStatusEnum": "apps.sources.models.StudentSourceInteraction.Status",
+        "UserSubscriptionStatusEnum": "apps.subscriptions.models.UserSubscription.Status",
+        "NotificationCategoryEnum": "apps.notifications.models.Notification.Category",
+        "SupportTicketCategoryEnum": "apps.support.models.SupportTicket.Category",
+        "SupportTicketPriorityEnum": "apps.support.models.SupportTicket.Priority",
+        "SupportTicketStatusEnum": "apps.support.models.SupportTicket.Status",
     },
 }
 
@@ -301,13 +323,45 @@ AI_SERVICE_BASE_URL = env("AI_SERVICE_BASE_URL", default="http://ai-service:8001
 AI_SERVICE_JOBS_PATH = env("AI_SERVICE_JOBS_PATH", default="/api/ai/v1/jobs")
 AI_SERVICE_FEEDBACK_PATH = env("AI_SERVICE_FEEDBACK_PATH", default="/api/ai/v1/feedback")
 AI_SERVICE_HEALTH_PATH = env("AI_SERVICE_HEALTH_PATH", default="/api/ai/v1/health/ready")
-AI_SERVICE_INTERNAL_API_KEY = env("AI_SERVICE_INTERNAL_API_KEY", default="")
-AI_SERVICE_WEBHOOK_SECRET = env("AI_SERVICE_WEBHOOK_SECRET", default="")
 AI_SERVICE_VERIFY_SSL = env("AI_SERVICE_VERIFY_SSL")
 AI_SERVICE_TIMEOUT_SECONDS = env("AI_SERVICE_TIMEOUT_SECONDS")
 AI_DATASET_CONSENT_VERSION = env("AI_DATASET_CONSENT_VERSION")
-if AI_SERVICE_ENABLED and not DEBUG and (len(AI_SERVICE_INTERNAL_API_KEY) < 32 or len(AI_SERVICE_WEBHOOK_SECRET) < 32):
-    raise ImproperlyConfigured("AI service credentials must be at least 32 characters in production.")
+PAYMENTS_ENABLED = env("PAYMENTS_ENABLED")
+BARAQ_SERVICE_ID = env("BARAQ_SERVICE_ID", default="baraq-django")
+BARAQ_HMAC_CURRENT_KEY_ID = env("BARAQ_HMAC_CURRENT_KEY_ID", default="django-dev-1")
+BARAQ_HMAC_KEYS_JSON = env(
+    "BARAQ_HMAC_KEYS_JSON",
+    default='{"django-dev-1":"local-development-key-not-for-production"}',
+)
+BARAQ_HMAC_ALLOWED_SERVICES = resolve_list_setting(
+    env,
+    "BARAQ_HMAC_ALLOWED_SERVICES",
+    default=["baraq-ai-service"],
+)
+BARAQ_HMAC_MAX_CLOCK_SKEW_SECONDS = env.int("BARAQ_HMAC_MAX_CLOCK_SKEW_SECONDS", default=300)
+BARAQ_HMAC_NONCE_TTL_SECONDS = env.int("BARAQ_HMAC_NONCE_TTL_SECONDS", default=600)
+
+if BARAQ_HMAC_MAX_CLOCK_SKEW_SECONDS < 1 or BARAQ_HMAC_MAX_CLOCK_SKEW_SECONDS > 3600:
+    raise ImproperlyConfigured("BARAQ_HMAC_MAX_CLOCK_SKEW_SECONDS must be between 1 and 3600.")
+if BARAQ_HMAC_NONCE_TTL_SECONDS < 1 or BARAQ_HMAC_NONCE_TTL_SECONDS > 7200:
+    raise ImproperlyConfigured("BARAQ_HMAC_NONCE_TTL_SECONDS must be between 1 and 7200.")
+try:
+    _baraq_hmac_keyring = json.loads(BARAQ_HMAC_KEYS_JSON)
+except json.JSONDecodeError as exc:
+    raise ImproperlyConfigured("BARAQ_HMAC_KEYS_JSON must be a JSON object.") from exc
+if (
+    not isinstance(_baraq_hmac_keyring, dict)
+    or not _baraq_hmac_keyring
+    or BARAQ_HMAC_CURRENT_KEY_ID not in _baraq_hmac_keyring
+    or any(not isinstance(key_id, str) or not isinstance(secret, str) or not secret for key_id, secret in _baraq_hmac_keyring.items())
+):
+    raise ImproperlyConfigured("BARAQ_HMAC_KEYS_JSON must contain the current non-empty key.")
+if AI_SERVICE_ENABLED and not DEBUG and (
+    any(len(secret) < 32 or secret == "local-development-key-not-for-production" for secret in _baraq_hmac_keyring.values())
+    or BARAQ_SERVICE_ID != "baraq-django"
+    or BARAQ_HMAC_ALLOWED_SERVICES != ["baraq-ai-service"]
+):
+    raise ImproperlyConfigured("Production requires the approved Baraq HMAC V2 service and keyring configuration.")
 
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = env("EMAIL_HOST", default="")

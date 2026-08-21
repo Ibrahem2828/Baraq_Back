@@ -34,8 +34,8 @@
 - **apps/subjects**: المراحل والمواد وربط المستخدم بمواده
 - **apps/study_plans**: نظام التخطيط الدراسي
 - **apps/quizzes**: نظام الاختبارات والمحاولات والنتائج
-- **apps/ai_gateway**: طبقة الربط المستقبلية مع خدمات الذكاء الاصطناعي
-- **apps/analytics / audio / summaries / notifications / support**: placeholders للمراحل القادمة
+- **apps/ai_integration**: البوابة الفعلية لخدمة الذكاء الاصطناعي المستقلة (jobs، webhooks، manifests)
+- **apps/analytics / audio / summaries / notifications / support**: تطبيقات فعالة (توصيات، تفريغ صوتي، ملخصات، إشعارات، دعم)
 
 الفكرة الأساسية في التصميم هي:
 
@@ -729,95 +729,6 @@
 
 ---
 
-## 12. تطبيق الذكاء الاصطناعي الوسيط `apps/ai_gateway/`
-
-هذا التطبيق لا ينفذ AI حقيقي داخل الباك نفسه، بل يمثل **طبقة وسيطة** قابلة للاستبدال لاحقًا.
-
-فكرته الأساسية:
-- بقية التطبيقات لا تتعامل مباشرة مع مزود AI خارجي
-- تتعامل بدلًا من ذلك مع `ai_gateway`
-- هذه الطبقة يمكنها العمل في وضع:
-  - disabled/mock
-  - enabled/remote
-
-### `apps/ai_gateway/__init__.py`
-- تعريف الحزمة.
-
-### `apps/ai_gateway/apps.py`
-- إعداد AppConfig للتطبيق.
-
-### `apps/ai_gateway/exceptions.py`
-- يحتوي استثناءات متخصصة مثل:
-  - `AIServiceError`
-  - `AIServiceDisabledError`
-  - `AIServiceTimeoutError`
-  - `AIServiceBadResponseError`
-  - `AIServiceAuthenticationError`
-
-أهميته:
-- تقديم طبقة أخطاء واضحة بدل استخدام أخطاء requests العامة مباشرة.
-
-### `apps/ai_gateway/schemas.py`
-- يحتوي dataclass schemas للعمليات المتوقعة، مثل:
-  - توليد خطة
-  - توليد اختبار
-  - تلخيص
-  - تفريغ صوت
-  - توصيات
-
-أهميته:
-- توحيد شكل payloads الداخلية للخدمة.
-
-### `apps/ai_gateway/client.py`
-- يحتوي `AIServiceClient`.
-- مسؤول عن:
-  - بناء URL
-  - بناء headers
-  - تنفيذ الطلب الخارجي
-  - التعامل مع timeout/auth/errors
-  - health check للخدمة الخارجية
-
-أهميته:
-- عزل طبقة HTTP الخارجية في ملف واحد.
-
-### `apps/ai_gateway/services.py`
-- الواجهة البرمجية الفعلية التي يستخدمها بقية المشروع.
-- يحتوي:
-  - `get_gateway_status`
-  - `generate_study_plan`
-  - `generate_quiz`
-  - `summarize_text`
-  - `transcribe_audio`
-  - `generate_recommendations`
-  - `ai_health_check`
-
-أهميته:
-- عندما يكون AI غير مفعّل، يعيد mock responses عملية.
-- وعندما يُفعّل لاحقًا، يبقى interface الداخلي نفسه تقريبًا.
-
-### `apps/ai_gateway/views.py`
-- يحتوي:
-  - `AIGatewayStatusView`
-  - `AIGatewayHealthView`
-
-وظيفته:
-- exposing endpoints للتأكد من حالة بوابة الذكاء:
-  - `GET /api/ai-gateway/status/`
-  - `GET /api/ai-gateway/health/`
-
-### `apps/ai_gateway/urls.py`
-- يربط مسارات status وhealth.
-
-### `apps/ai_gateway/tests.py`
-- يحتوي اختبارات:
-  - status endpoint
-  - عدم تسريب API key
-  - mock mode
-  - quiz/study plan AI integration
-  - schema stability
-
----
-
 ## 13. التطبيقات المستقبلية Placeholder Apps
 
 هذه التطبيقات موجودة كبنية تحضيرية فقط، وليست منفذة فعليًا بعد.
@@ -1070,6 +981,6 @@
 - خُطى يبني خطة التنفيذ
 - فاحص يقيس التقدم والفهم
 - common يفرض التماسك التشغيلي
-- ai_gateway يفتح الطريق للتوسع الذكي لاحقًا
+- ai_integration هو البوابة الفعلية المفعّلة لخدمة الذكاء الاصطناعي المستقلة
 
 هذا يجعل المشروع في وضع جيد جدًا للاستمرار إلى المراحل القادمة بدون الحاجة إلى إعادة هندسة جذرية.

@@ -4,6 +4,7 @@ from pathlib import Path
 from rest_framework import serializers
 
 from apps.quizzes.serializers import QuizListSerializer
+from apps.projects.models import Project
 from apps.study_plans.serializers import StudyPlanListSerializer
 from apps.subjects.models import Subject
 from apps.subjects.serializers import SubjectSerializer
@@ -45,6 +46,7 @@ class StudentSourceBriefSerializer(serializers.ModelSerializer):
             'id',
             'title',
             'source_type',
+            'project',
             'subject',
             'subject_name',
             'collection',
@@ -70,6 +72,7 @@ class StudentSourceCollectionListSerializer(serializers.ModelSerializer):
         fields = (
             'id',
             'name',
+            'project',
             'description',
             'subject',
             'subject_name',
@@ -114,6 +117,11 @@ class StudentSourceCollectionDetailSerializer(StudentSourceCollectionListSeriali
 
 
 class StudentSourceCollectionCreateUpdateSerializer(serializers.ModelSerializer):
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.filter(is_deleted=False, status=Project.Status.ACTIVE),
+        required=False,
+        allow_null=True,
+    )
     subject = serializers.PrimaryKeyRelatedField(
         queryset=Subject.objects.filter(is_active=True, education_stage__is_active=True),
         required=False,
@@ -130,7 +138,12 @@ class StudentSourceCollectionCreateUpdateSerializer(serializers.ModelSerializer)
 
     class Meta:
         model = StudentSourceCollection
-        fields = ('name', 'description', 'subject', 'color', 'icon', 'status')
+        fields = ('name', 'description', 'subject', 'project', 'color', 'icon', 'status')
+
+    def validate_project(self, value):
+        if value and value.owner_id != self.context['request'].user.id:
+            raise serializers.ValidationError('Project not found or not owned by the current user.')
+        return value
 
     def create(self, validated_data):
         return StudentSourceCollection.objects.create(
@@ -153,6 +166,7 @@ class StudentSourceListSerializer(serializers.ModelSerializer):
             'title',
             'description',
             'source_type',
+            'project',
             'subject',
             'subject_name',
             'collection',
@@ -219,6 +233,11 @@ class StudentSourceDetailSerializer(StudentSourceListSerializer):
 
 
 class StudentSourceCreateSerializer(serializers.ModelSerializer):
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.filter(is_deleted=False, status=Project.Status.ACTIVE),
+        required=False,
+        allow_null=True,
+    )
     subject = serializers.PrimaryKeyRelatedField(
         queryset=Subject.objects.filter(is_active=True, education_stage__is_active=True),
         required=False,
@@ -248,12 +267,17 @@ class StudentSourceCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StudentSource
-        fields = ('id', 'title', 'description', 'subject', 'collection', 'file')
+        fields = ('id', 'title', 'description', 'project', 'subject', 'collection', 'file')
         read_only_fields = ('id',)
 
     def validate_collection(self, value):
         if value and value.user_id != self.context['request'].user.id:
             raise serializers.ValidationError('المجلد غير موجود أو لا تملك صلاحية استخدامه.')
+        return value
+
+    def validate_project(self, value):
+        if value and value.owner_id != self.context['request'].user.id:
+            raise serializers.ValidationError('Project not found or not owned by the current user.')
         return value
 
     def validate_file(self, value):
@@ -262,8 +286,13 @@ class StudentSourceCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         collection = attrs.get('collection')
+        project = attrs.get('project')
         if collection and attrs.get('subject') is None and collection.subject_id:
             attrs['subject'] = collection.subject
+        if collection and collection.project_id:
+            if project and project.id != collection.project_id:
+                raise serializers.ValidationError({'project': 'Project must match the selected collection project.'})
+            attrs['project'] = collection.project
         return attrs
 
     def create(self, validated_data):
@@ -281,6 +310,11 @@ class StudentSourceCreateSerializer(serializers.ModelSerializer):
 
 
 class StudentSourceUpdateSerializer(serializers.ModelSerializer):
+    project = serializers.PrimaryKeyRelatedField(
+        queryset=Project.objects.filter(is_deleted=False, status=Project.Status.ACTIVE),
+        required=False,
+        allow_null=True,
+    )
     subject = serializers.PrimaryKeyRelatedField(
         queryset=Subject.objects.filter(is_active=True, education_stage__is_active=True),
         required=False,
@@ -294,12 +328,26 @@ class StudentSourceUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StudentSource
-        fields = ('title', 'description', 'subject', 'collection')
+        fields = ('title', 'description', 'project', 'subject', 'collection')
 
     def validate_collection(self, value):
         if value and value.user_id != self.context['request'].user.id:
             raise serializers.ValidationError('المجلد غير موجود أو لا تملك صلاحية استخدامه.')
         return value
+
+    def validate_project(self, value):
+        if value and value.owner_id != self.context['request'].user.id:
+            raise serializers.ValidationError('Project not found or not owned by the current user.')
+        return value
+
+    def validate(self, attrs):
+        collection = attrs.get('collection', getattr(self.instance, 'collection', None))
+        project = attrs.get('project', getattr(self.instance, 'project', None))
+        if collection and collection.project_id:
+            if project and project.id != collection.project_id:
+                raise serializers.ValidationError({'project': 'Project must match the selected collection project.'})
+            attrs['project'] = collection.project
+        return attrs
 
 
 class UseWithCharacterSerializer(serializers.Serializer):

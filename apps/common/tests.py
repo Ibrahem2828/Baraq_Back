@@ -1,18 +1,71 @@
 from datetime import timedelta
 
+import environ
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.common.env_config import resolve_list_setting
 from apps.quizzes.models import Quiz
 from apps.study_plans.models import StudyPlan
 from apps.subjects.models import EducationStage, Subject
 
 User = get_user_model()
+
+
+def _env_from(mapping):
+    env = environ.Env()
+    env.ENVIRON = dict(mapping)
+    return env
+
+
+class ResolveListSettingTests(SimpleTestCase):
+    """Guards against the CSRF_TRUSTED_ORIGINS / DJANGO_CSRF_TRUSTED_ORIGINS
+    naming conflict silently dropping real production domains."""
+
+    def test_reads_primary_key_when_only_it_is_set(self):
+        env = _env_from({
+            'CSRF_TRUSTED_ORIGINS': 'https://api.barraq.example,https://dashboard.barraq.example',
+        })
+
+        result = resolve_list_setting(env, 'CSRF_TRUSTED_ORIGINS', fallback_keys=('DJANGO_CSRF_TRUSTED_ORIGINS',))
+
+        self.assertEqual(
+            result,
+            ['https://api.barraq.example', 'https://dashboard.barraq.example'],
+        )
+
+    def test_raises_when_only_a_legacy_fallback_key_is_set(self):
+        env = _env_from({
+            'DJANGO_CSRF_TRUSTED_ORIGINS': 'https://api.barraq.example,https://dashboard.barraq.example',
+        })
+
+        with self.assertRaises(ValueError):
+            resolve_list_setting(env, 'CSRF_TRUSTED_ORIGINS', fallback_keys=('DJANGO_CSRF_TRUSTED_ORIGINS',))
+
+    def test_raises_when_both_primary_and_legacy_key_are_set(self):
+        env = _env_from({
+            'CSRF_TRUSTED_ORIGINS': 'http://localhost:3000',
+            'DJANGO_CSRF_TRUSTED_ORIGINS': 'https://api.barraq.example',
+        })
+
+        with self.assertRaises(ValueError):
+            resolve_list_setting(env, 'CSRF_TRUSTED_ORIGINS', fallback_keys=('DJANGO_CSRF_TRUSTED_ORIGINS',))
+
+    def test_falls_back_to_default_when_nothing_is_set(self):
+        env = _env_from({})
+
+        result = resolve_list_setting(
+            env, 'CSRF_TRUSTED_ORIGINS',
+            fallback_keys=('DJANGO_CSRF_TRUSTED_ORIGINS',),
+            default=['https://cors-origin.example'],
+        )
+
+        self.assertEqual(result, ['https://cors-origin.example'])
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'])

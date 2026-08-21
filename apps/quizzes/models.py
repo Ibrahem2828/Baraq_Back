@@ -4,7 +4,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from apps.common.models import BaseModel
+from apps.common.models import BaseModel, SoftDeleteModel
 
 
 class DifficultyLevelChoices(models.TextChoices):
@@ -57,6 +57,13 @@ class Quiz(BaseModel):
         on_delete=models.CASCADE,
         related_name='quizzes',
     )
+    project = models.ForeignKey(
+        'projects.Project',
+        on_delete=models.SET_NULL,
+        related_name='quizzes',
+        null=True,
+        blank=True,
+    )
     subject = models.ForeignKey(
         'subjects.Subject',
         on_delete=models.CASCADE,
@@ -91,6 +98,10 @@ class Quiz(BaseModel):
 
     class Meta:
         ordering = ('-created_at',)
+        indexes = [
+            models.Index(fields=['user', 'status'], name='quiz_user_status_idx'),
+            models.Index(fields=['project', 'status', '-created_at'], name='quiz_project_status_idx'),
+        ]
 
     def __str__(self):
         return f"{self.title} - {self.user.email}"
@@ -153,7 +164,7 @@ class Choice(BaseModel):
         return f"Choice {self.order} - Question {self.question_id}"
 
 
-class QuizAttempt(BaseModel):
+class QuizAttempt(SoftDeleteModel):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -185,6 +196,9 @@ class QuizAttempt(BaseModel):
 
     class Meta:
         ordering = ('-started_at',)
+        indexes = [
+            models.Index(fields=['user', 'quiz', 'status'], name='qa_user_quiz_status_idx'),
+        ]
 
     def __str__(self):
         return f"Attempt {self.id} - {self.quiz.title}"

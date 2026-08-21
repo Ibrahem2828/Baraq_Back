@@ -1,3 +1,4 @@
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import filters, permissions, status, viewsets
 from rest_framework.exceptions import ValidationError
@@ -176,6 +177,7 @@ class AdminSubscriptionUsageViewSet(AdminSubscriptionPermissionMixin, viewsets.R
         return queryset
 
 
+@extend_schema(tags=['Subscriptions'], responses=OpenApiTypes.OBJECT)
 class SubscriptionApiRootView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
