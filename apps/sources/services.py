@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 
 from django.db import transaction
 from django.utils import timezone
@@ -12,6 +13,7 @@ from apps.ai_integration.services import create_ai_job
 from .models import StudentSource, StudentSourceInteraction
 
 TXT_READ_LIMIT_BYTES = 2 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def _sha256_file(source):
@@ -58,11 +60,12 @@ def process_source(source):
         source.processing_error = ''
         source.save(update_fields=['status', 'extracted_text', 'processing_error', 'metadata', 'updated_at'])
         return {'success': True, 'message': message}
-    except Exception as exc:
+    except Exception:
+        logger.exception("Source processing failed for source_id=%s", source.pk)
         source.status = StudentSource.Status.FAILED
-        source.processing_error = str(exc)[:2000]
+        source.processing_error = 'Source processing failed.'
         source.save(update_fields=['status', 'processing_error', 'updated_at'])
-        return {'success': False, 'message': 'فشلت معالجة المصدر.', 'error': str(exc)}
+        return {'success': False, 'message': 'فشلت معالجة المصدر.', 'code': 'source_processing_failed'}
 
 
 TASK_BY_CHARACTER = {

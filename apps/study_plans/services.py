@@ -1,7 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.utils import timezone
 

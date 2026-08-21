@@ -2,7 +2,6 @@ from pathlib import Path
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import connection
 from django.db.models import Avg, Count, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -24,7 +23,6 @@ from apps.sources.models import (
     StudentSourceCollection,
     StudentSourceInteraction,
 )
-from apps.students.models import StudentProfile
 from apps.study_plans.models import StudyPlan
 from apps.subscriptions.models import UserSubscription
 from apps.subscriptions.serializers import (
@@ -36,7 +34,7 @@ from apps.subscriptions.services import (
     change_user_plan,
 )
 
-from .models import AdminPermission, AdminRole, AdminUserRole, AuditLog
+from .models import AdminPermission, AdminRole, AuditLog
 from .permissions import HasAdminPermission, IsAdminDashboardUser
 from .serializers import (
     AdminCharacterInteractionSerializer,

@@ -31,8 +31,8 @@ SECURE_SSL_REDIRECT=True
 - `CORS_ALLOWED_ORIGINS`
 - `CSRF_TRUSTED_ORIGINS`
 - `AI_SERVICE_BASE_URL`
-- `AI_SERVICE_INTERNAL_API_KEY`
-- `AI_SERVICE_WEBHOOK_SECRET`
+- `BARAQ_HMAC_CURRENT_KEY_ID`
+- `BARAQ_HMAC_KEYS_JSON`
 
 لا تستخدم القيم المثالّية حرفياً.
 
@@ -65,8 +65,8 @@ AWS_S3_REGION_NAME=...
 
 ## 6. الصحة
 
-- Liveness: `/api/health/live/`
-- Readiness: `/api/health/ready/`
+- Liveness: `/api/v1/health/live/`
+- Readiness: `/api/v1/health/ready/`
 
 لا تستخدم readiness كـliveness، لأن readiness تتحقق من DB وRedis والتخزين.
 
@@ -83,8 +83,8 @@ AWS_S3_REGION_NAME=...
 
 ```bash
 curl -fsS https://api.barraq.xn--mgbaab0cxheq.tech/
-curl -fsS https://api.barraq.xn--mgbaab0cxheq.tech/api/health/live/
-curl -fsS https://api.barraq.xn--mgbaab0cxheq.tech/api/health/ready/
+curl -fsS https://api.barraq.xn--mgbaab0cxheq.tech/api/v1/health/live/
+curl -fsS https://api.barraq.xn--mgbaab0cxheq.tech/api/v1/health/ready/
 curl -fsS https://api.barraq.xn--mgbaab0cxheq.tech/api/v1/
 ```
 

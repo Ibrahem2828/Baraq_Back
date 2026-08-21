@@ -495,7 +495,7 @@ def fail_job(job, error):
         return job
     job.status = AIJob.Status.FAILED
     job.error_code = getattr(error, "code", "ai_job_failed")
-    job.error_message = str(error)[:2000]
+    job.error_message = 'The AI request could not be completed. Please try again.'
     job.completed_at = timezone.now()
     job.save(update_fields=["status", "error_code", "error_message", "completed_at", "updated_at"])
     if job.credits_reserved and not job.credits_committed:

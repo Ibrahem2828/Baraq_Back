@@ -7,7 +7,6 @@ from apps.projects.models import Project
 from .models import (
     AttemptStatusChoices,
     Choice,
-    DifficultyLevelChoices,
     GenerationTypeChoices,
     Question,
     QuestionBankItem,
@@ -15,7 +14,6 @@ from .models import (
     Quiz,
     QuizAttempt,
     QuizStatusChoices,
-    QuizTypeChoices,
     StudentAnswer,
 )
 from .services import create_quiz, update_quiz

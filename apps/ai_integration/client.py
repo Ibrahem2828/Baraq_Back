@@ -65,18 +65,32 @@ class AIServiceClient:
             raise AIServiceError("AI service timeout.", code="ai_service_timeout", retryable=True) from exc
         except requests.RequestException as exc:
             raise AIServiceError("AI service is unavailable.", code="ai_service_unavailable", retryable=True) from exc
-        try:
-            data = response.json()
-        except ValueError:
-            data = {"message": response.text[:500]}
         if response.status_code >= 300:
             retryable = response.status_code in {408, 425, 429, 500, 502, 503, 504}
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            logger.warning(
+                "AI service request failed with status=%s remote_code=%s",
+                response.status_code,
+                str(data.get("code") or "unknown")[:80],
+            )
             raise AIServiceError(
-                str(data.get("message") or data.get("detail") or "AI service request failed."),
-                code=str(data.get("code") or "ai_service_error"),
+                "AI service is unavailable." if retryable else "AI service rejected the request.",
+                code="ai_service_unavailable" if retryable else "ai_service_rejected",
                 status_code=response.status_code,
                 retryable=retryable,
             )
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise AIServiceError(
+                "AI service returned an invalid response.",
+                code="invalid_ai_service_response",
+                status_code=response.status_code,
+                retryable=False,
+            ) from exc
         return AIServiceResponse(data=data.get("data", data), status_code=response.status_code)
 
     def create_job(self, payload):

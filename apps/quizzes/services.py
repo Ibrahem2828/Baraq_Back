@@ -8,10 +8,7 @@ from rest_framework.exceptions import ValidationError
 
 from .models import (
     AttemptStatusChoices,
-    Choice,
-    DifficultyLevelChoices,
     GenerationTypeChoices,
-    Question,
     QuestionBankItem,
     QuestionTypeChoices,
     Quiz,

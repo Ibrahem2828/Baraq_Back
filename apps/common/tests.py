@@ -9,7 +9,12 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.common.env_config import resolve_list_setting
+from apps.common.env_config import (
+    resolve_list_setting,
+    validate_allowed_hosts,
+    validate_origin_url,
+    validate_secret_key,
+)
 from apps.quizzes.models import Quiz
 from apps.study_plans.models import StudyPlan
 from apps.subjects.models import EducationStage, Subject
@@ -66,6 +71,36 @@ class ResolveListSettingTests(SimpleTestCase):
         )
 
         self.assertEqual(result, ['https://cors-origin.example'])
+
+
+class ProductionEnvironmentValidationTests(SimpleTestCase):
+    def test_secret_key_rejects_low_entropy_value(self):
+        with self.assertRaises(ValueError):
+            validate_secret_key('a' * 60)
+
+    def test_origin_requires_https_when_requested(self):
+        with self.assertRaises(ValueError):
+            validate_origin_url(
+                'http://dashboard.example',
+                setting_name='CORS_ALLOWED_ORIGINS',
+                require_https=True,
+            )
+
+    def test_origin_rejects_paths_and_credentials(self):
+        with self.assertRaises(ValueError):
+            validate_origin_url(
+                'https://user:secret@dashboard.example/app',
+                setting_name='CORS_ALLOWED_ORIGINS',
+                require_https=True,
+            )
+
+    def test_allowed_hosts_cannot_use_wildcard(self):
+        with self.assertRaises(ValueError):
+            validate_allowed_hosts(['*'], public_api_hostname='api.example')
+
+    def test_allowed_hosts_must_cover_public_api_host(self):
+        with self.assertRaises(ValueError):
+            validate_allowed_hosts(['dashboard.example'], public_api_hostname='api.example')
 
 
 @override_settings(ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'])

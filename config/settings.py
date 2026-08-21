@@ -8,7 +8,13 @@ import sys
 import environ
 from django.core.exceptions import ImproperlyConfigured
 
-from apps.common.env_config import resolve_list_setting
+from apps.common.env_config import (
+    resolve_list_setting,
+    validate_allowed_hosts,
+    validate_origin_list,
+    validate_origin_url,
+    validate_secret_key,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -29,6 +35,7 @@ env = environ.Env(
     AI_SERVICE_ENABLED=(bool, True),
     AI_SERVICE_VERIFY_SSL=(bool, True),
     AI_SERVICE_TIMEOUT_SECONDS=(int, 30),
+    AI_SERVICE_ALLOW_INSECURE_HTTP=(bool, False),
     AI_DATASET_CONSENT_VERSION=(str, "2026-07-01"),
     PAYMENTS_ENABLED=(bool, False),
     SECURE_SSL_REDIRECT=(bool, True),
@@ -54,12 +61,26 @@ CSRF_TRUSTED_ORIGINS = resolve_list_setting(
 PUBLIC_API_BASE_URL = env("PUBLIC_API_BASE_URL", default="http://localhost:8000").rstrip("/")
 
 if not DEBUG:
-    if len(SECRET_KEY) < 50 or SECRET_KEY.startswith("django-insecure"):
-        raise ImproperlyConfigured("A strong SECRET_KEY of at least 50 characters is required in production.")
-    if not ALLOWED_HOSTS:
-        raise ImproperlyConfigured("ALLOWED_HOSTS must be configured in production.")
-    if not PUBLIC_API_BASE_URL.startswith("https://"):
-        raise ImproperlyConfigured("PUBLIC_API_BASE_URL must use HTTPS in production.")
+    try:
+        validate_secret_key(SECRET_KEY)
+        public_api_hostname = validate_origin_url(
+            PUBLIC_API_BASE_URL,
+            setting_name="PUBLIC_API_BASE_URL",
+            require_https=True,
+        )
+        validate_allowed_hosts(ALLOWED_HOSTS, public_api_hostname=public_api_hostname)
+        validate_origin_list(
+            CORS_ALLOWED_ORIGINS,
+            setting_name="CORS_ALLOWED_ORIGINS",
+            require_https=True,
+        )
+        validate_origin_list(
+            CSRF_TRUSTED_ORIGINS,
+            setting_name="CSRF_TRUSTED_ORIGINS",
+            require_https=True,
+        )
+    except ValueError as exc:
+        raise ImproperlyConfigured(str(exc)) from exc
 else:
     SECRET_KEY = SECRET_KEY or "django-insecure-development-only-not-for-production"
     ALLOWED_HOSTS = ALLOWED_HOSTS or ["127.0.0.1", "localhost", "testserver"]
@@ -258,6 +279,7 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Baraq Backend API",
     "DESCRIPTION": "Production API for Baraq mobile, dashboard, and AI service integration.",
     "VERSION": APP_VERSION,
+    "SERVERS": [{"url": PUBLIC_API_BASE_URL, "description": "Canonical production API origin"}],
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny" if API_DOCS_PUBLIC else "rest_framework.permissions.IsAdminUser"],
     "COMPONENT_SPLIT_REQUEST": True,
@@ -325,6 +347,7 @@ AI_SERVICE_FEEDBACK_PATH = env("AI_SERVICE_FEEDBACK_PATH", default="/api/ai/v1/f
 AI_SERVICE_HEALTH_PATH = env("AI_SERVICE_HEALTH_PATH", default="/api/ai/v1/health/ready")
 AI_SERVICE_VERIFY_SSL = env("AI_SERVICE_VERIFY_SSL")
 AI_SERVICE_TIMEOUT_SECONDS = env("AI_SERVICE_TIMEOUT_SECONDS")
+AI_SERVICE_ALLOW_INSECURE_HTTP = env("AI_SERVICE_ALLOW_INSECURE_HTTP")
 AI_DATASET_CONSENT_VERSION = env("AI_DATASET_CONSENT_VERSION")
 PAYMENTS_ENABLED = env("PAYMENTS_ENABLED")
 BARAQ_SERVICE_ID = env("BARAQ_SERVICE_ID", default="baraq-django")
@@ -362,6 +385,19 @@ if AI_SERVICE_ENABLED and not DEBUG and (
     or BARAQ_HMAC_ALLOWED_SERVICES != ["baraq-ai-service"]
 ):
     raise ImproperlyConfigured("Production requires the approved Baraq HMAC V2 service and keyring configuration.")
+if AI_SERVICE_ENABLED:
+    try:
+        validate_origin_url(
+            AI_SERVICE_BASE_URL,
+            setting_name="AI_SERVICE_BASE_URL",
+            require_https=not DEBUG and not AI_SERVICE_ALLOW_INSECURE_HTTP,
+        )
+    except ValueError as exc:
+        raise ImproperlyConfigured(str(exc)) from exc
+    if not DEBUG and AI_SERVICE_BASE_URL.lower().startswith("http://") and AI_SERVICE_VERIFY_SSL:
+        raise ImproperlyConfigured(
+            "AI_SERVICE_VERIFY_SSL must be False when AI_SERVICE_BASE_URL uses HTTP."
+        )
 
 EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = env("EMAIL_HOST", default="")

@@ -1,11 +1,12 @@
 import tempfile
 import time
+from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
@@ -16,11 +17,27 @@ from apps.subscriptions.models import UsageLedgerEntry
 from apps.subscriptions.services import reserve_character_request
 from apps.subjects.models import EducationStage, Subject
 
+from .client import AIServiceClient, AIServiceError
 from .models import AIJob
 from .security import make_service_signature
 from .services import build_service_payload, complete_job, update_job_progress
 
 User = get_user_model()
+
+
+@override_settings(AI_SERVICE_ENABLED=True, AI_SERVICE_BASE_URL='https://ai.example.test')
+class AIServiceClientSafetyTests(SimpleTestCase):
+    @patch('apps.ai_integration.client.requests.Session.request')
+    def test_upstream_error_does_not_expose_upstream_message(self, request):
+        response = Mock(status_code=500)
+        response.json.return_value = {'message': 'database password=do-not-leak', 'code': 'internal_exception'}
+        request.return_value = response
+
+        with self.assertRaises(AIServiceError) as raised:
+            AIServiceClient().create_job({'task_type': 'fahes_generate_quiz'})
+
+        self.assertEqual(raised.exception.code, 'ai_service_unavailable')
+        self.assertNotIn('password', str(raised.exception))
 
 
 @override_settings(

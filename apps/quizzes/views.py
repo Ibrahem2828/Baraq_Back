@@ -4,7 +4,7 @@ from rest_framework import filters, mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import Choice, GenerationTypeChoices, Question, Quiz, QuizAttempt, QuizStatusChoices, StudentAnswer
+from .models import GenerationTypeChoices, Question, QuizStatusChoices
 from .permissions import CanAccessQuestionBankItem, IsQuizOwner
 from .selectors import (
     get_attempt_detail,

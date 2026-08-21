@@ -1,13 +1,12 @@
 import tempfile
 
 from django.contrib.auth import get_user_model
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.sources.models import StudentSource, StudentSourceCollection
+from apps.sources.models import StudentSourceCollection
 from apps.subjects.models import EducationStage, Subject
 
 from .models import AdminPermission, AdminRole, AdminUserRole, AuditLog
